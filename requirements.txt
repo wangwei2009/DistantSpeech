@@ -4,4 +4,3 @@ scipy>=0.18.0
 matplotlib
 sounddevice
 samplerate
-pyaudio

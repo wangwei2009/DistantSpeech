@@ -3,7 +3,7 @@ import time
 import threading
 import wave
 import numpy as np
- 
+
 class Recorder():
     def __init__(self, chunk=1024, channels=1, rate=16000):
         self.CHUNK = chunk
@@ -40,17 +40,16 @@ class Recorder():
                         rate=self.RATE,
                         input=True,
                         frames_per_buffer=self.CHUNK,
-                        input_device_index=self.input_device_index,
-                        input_host_api_specific_stream_info=paWASAPI)
+                        input_device_index=self.input_device_index)
         while(self._running):
             data = stream.read(self.CHUNK)
-            
+            print(len(data))
             samps = np.fromstring(data, dtype=np.int16)
-            #print(len(samps))
+            print(len(samps))
                         
-            samps = np.reshape(samps, (1024, 1))
-            samps = samps[:,0]
-            data_frame = samps.astype(np.int16).tostring()
+            samps = np.reshape(samps, (1024, 6))
+            samps = samps[:,1]
+            data = samps.astype(np.int16).tostring()
             self._frames.append(data)
  
         stream.stop_stream()
@@ -90,5 +89,5 @@ if __name__ == "__main__":
                 fina = time.time()
                 t = fina - begin
                 print('录音时间为%ds'%t)
-                rec.save("2_%d.wav"%i)
+                rec.save("1_%d.wav"%i)
 
