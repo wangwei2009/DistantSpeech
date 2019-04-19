@@ -48,7 +48,7 @@ class fixedbeamfomer(beamformer):
     def calTau(self,angle):
         pass
 
-    def superDirectiveMVDR(self,x,angle):
+    def superDirectiveMVDR2(self,x,angle):
         """
         MVDR beamformer under isotropic noise field
 
@@ -86,7 +86,7 @@ class fixedbeamfomer(beamformer):
         yout /= np.where(norm > 1e-10, norm, 1.0)
         return yout
 
-    def superDirectiveMVDR2(self,x,angle):
+    def superDirectiveMVDR(self,x,angle,WNG = False, DI = False):
         """
         superdirective MVDR beamformer using built-in STFT function
 
@@ -95,13 +95,24 @@ class fixedbeamfomer(beamformer):
         Zout = np.zeros((1,Zxx.shape[1],Zxx.shape[2]),dtype=complex)
 
         tao = -1 * self.r * np.cos(angle[1]) * np.cos(angle[0] - self.gamma) / self.c
+        tao = tao[:,np.newaxis]
 
         Fvv = gen_noise_msc(self.M, self.nfft, self.fs, self.r)
-        H = np.mat(np.ones([self.half_bin, self.M]), dtype=complex).T
+        H = np.ones([self.M,self.half_bin], dtype=complex)
+
+        if WNG:
+            retWNG = np.ones(self.half_bin)
+        if DI:
+            retDI = np.ones(self.half_bin)
 
         for k in range(0, self.half_bin):
-            a = np.mat(np.exp(-1j * self.omega[k] * tao)).T  # propagation vector
-            H[:,k] = self.getweights(a,'MVDR',Fvv[k, :, :])
+            a = np.exp(-1j * self.omega[k] * tao)  # propagation vector
+            H[:,k,np.newaxis] = self.getweights(a,'MVDR',Fvv[k, :, :])
+
+            if WNG:
+                retWNG[k] = self.calcWNG(a, H[:,k,np.newaxis])
+            if DI:
+                retDI[k] = self.calcDI(a, H[:, k, np.newaxis],Fvv[k,:,:])
 
         for t in range(0, Zxx.shape[2]):
             x_fft = np.array(np.conj(H)) * Zxx[:,:,t]
@@ -109,9 +120,17 @@ class fixedbeamfomer(beamformer):
             Zout[:,:,t] = yf
 
         _, xrec = signal.istft(Zout, self.fs)
-        return xrec
 
-    def delaysum(self,x,angle):
+        if WNG and DI:
+            return xrec, retWNG, retDI
+        elif WNG:
+            return xrec, retWNG
+        elif DI:
+            return xrec, retDI
+        else:
+            return xrec
+
+    def delaysum(self,x,angle,WNG = False, DI = False):
         """
         delay-and-sum beamformer using built-in stft
 
@@ -120,15 +139,24 @@ class fixedbeamfomer(beamformer):
         Zout = np.zeros((1,Zxx.shape[1],Zxx.shape[2]),dtype=complex)
 
         tao = -1 * self.r * np.cos(angle[1]) * np.cos(angle[0] - self.gamma) / self.c
+        tao = tao[:, np.newaxis]
 
-        Fvv = np.ones((self.half_bin, self.M, self.M),dtype=complex)
-        H = np.mat(np.ones([self.half_bin, self.M]), dtype=complex).T
+        H = np.ones([self.M,self.half_bin], dtype=complex)
 
-        alpha = 0.9
+        if WNG:
+            retWNG = np.ones(self.half_bin)
+        if DI:
+            retDI = np.ones(self.half_bin)
+            Fvv = gen_noise_msc(self.M, self.nfft, self.fs, self.r)
 
         for k in range(0, self.half_bin):
-            a = np.mat(np.exp(-1j * self.omega[k] * tao)).T  # propagation vector
-            H[:,k] = self.getweights(a,'DS')
+            a = np.exp(-1j * self.omega[k] * tao)   # propagation vector
+            H[:,k,np.newaxis] = self.getweights(a,'DS')
+            if WNG:
+                retWNG[k] = self.calcWNG(a, H[:,k,np.newaxis])
+            if DI:
+                retDI[k] = self.calcDI(a, H[:, k, np.newaxis],Fvv[k,:,:])
+
 
         for t in range(0, Zxx.shape[2]):
             x_fft = np.array(np.conj(H)) * Zxx[:,:,t]
@@ -136,5 +164,17 @@ class fixedbeamfomer(beamformer):
             Zout[:,:,t] = yf
 
         _, xrec = signal.istft(Zout, self.fs)
-        return xrec
+
+        if WNG and DI:
+            return xrec, retWNG, retDI
+        elif WNG:
+            return xrec, retWNG
+        elif DI:
+            return xrec, retDI
+        else:
+            return xrec
+
+
+
+
 

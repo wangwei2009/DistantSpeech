@@ -12,19 +12,15 @@ import wave
 import sys
 import numpy as np
 import matplotlib.pyplot as plt
-from beamformer.MVDR import MVDR
-from beamformer.MicArray import MicArray
-from beamformer.fixedbeamformer import fixedbeamfomer
-
-
 from scipy.io import wavfile
-from scipy.signal import windows
 from scipy import signal
-from  scipy.signal import stft
 import os
 import time
-from matplotlib import pyplot as plt
 import librosa
+
+from beamformer.MicArray import MicArray
+from beamformer.fixedbeamformer import fixedbeamfomer
+from beamformer.adaptivebeamformer import adaptivebeamfomer
 
 
 filepath = "E:/work/matlab/Github/beamformer/sound/rec1/"
@@ -52,16 +48,17 @@ start = time.clock()
 MicArray = MicArray(arrayType='circular', r=0.032, M=4)
 angle = np.array([197, 0]) / 180 * np.pi
 
-# MVDRbeamformer = MVDR(MicArray,frameLen,hop,nfft,c,r,fs)
 fixedbeamformer = fixedbeamfomer(MicArray,frameLen,hop,nfft,c,r,fs)
+yout,WNG,DI = fixedbeamformer.superDirectiveMVDR(x,angle,WNG=True,DI=True)
+yout,WNG,DI = fixedbeamformer.delaysum(x,angle,WNG=True,DI=True)
 
-yout = fixedbeamformer.superDirectiveMVDR2(x,angle)
-# yout = fixedbeamformer.delaysum(x,angle)
-# yout = MVDRbeamformer.AdaptiveMVDR(x,angle)
+adaptivebeamfomer = adaptivebeamfomer(MicArray,frameLen,hop,nfft,c,r,fs)
+yout,WNG,DI = adaptivebeamfomer.AdaptiveMVDR2(x,angle,WNG=True,DI=True)
+
 yout = np.squeeze(yout)
 end = time.clock()
-plt.plot(yout)
+plt.plot(DI)
 plt.show()
 # wavfile.write('ds_fft_oop.wav',16000,yout)
-wavfile.write('sumvdrpy_stft_oop.wav',16000,yout)
+wavfile.write('mvdrpy_stft_oop.wav',16000,yout)
 print(end-start)

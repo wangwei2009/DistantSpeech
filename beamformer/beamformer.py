@@ -24,18 +24,29 @@ class beamformer(object):
             if Rvv is None:
                 warnings.warn("Rvv not provided,using eye(M,M)\n")
                 Rvv = np.eye([self.M,self.M])
-            Fvv_k = np.mat((Rvv) + Diagonal * np.eye(self.M))  # Diagonal loading
+            Fvv_k = (Rvv) + Diagonal * np.eye(self.M)  # Diagonal loading
             Fvv_k_inv = np.linalg.inv(Fvv_k)
-            weights =  np.array(Fvv_k_inv * a) / \
-                   np.array(a.conj().T * Fvv_k_inv * a)  # MVDR weights
+            weights =  Fvv_k_inv @ a / \
+                    (a.conj().T @ Fvv_k_inv @ a)  # MVDR weights
         else:
             raise ValueError('Unknown beamformer weights: %s' % weightType)
         return weights
 
-    def calcWNG(self, a, H):
+    def calcWNG(self, ak, Hk):
             """
-            calculate White Noise Gain
+            calculate White Noise Gain per frequency bin
 
             """
-            WNG = 0
-            return 0
+            WNG = np.squeeze(np.abs(Hk.conj().T@ak)**2/ \
+                                    np.real((Hk.conj().T@Hk)))
+
+            return 10*np.log10(WNG)
+    def calcDI(self, ak, Hk,Fvvk):
+            """
+            calculate directive index per frequency bin
+
+            """
+            WNG = np.squeeze(np.abs(Hk.conj().T@ak)**2/ \
+                                    np.real((Hk.conj().T@Fvvk@Hk)))
+
+            return 10*np.log10(WNG)
