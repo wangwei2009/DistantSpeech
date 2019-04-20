@@ -31,9 +31,6 @@ class adaptivebeamfomer(beamformer):
         self.freq_bin = np.linspace(0, self.half_bin - 1, self.half_bin)
         self.omega = 2 * np.pi * self.freq_bin * self.fs / self.nfft
 
-    def calTau(self,angle):
-        pass
-
     def AdaptiveMVDR2(self,x,angle):
         """
         MVDR beamformer
@@ -83,7 +80,7 @@ class adaptivebeamfomer(beamformer):
         yout /= np.where(norm > 1e-10, norm, 1)
         return yout
 
-    def AdaptiveMVDR(self,x,angle,WNG = False, DI = False):
+    def AdaptiveMVDR(self,x,angle,retH=True,retWNG=True,retDI=True):
         """
         MVDR beamformer using built-in stft
 
@@ -97,11 +94,17 @@ class adaptivebeamfomer(beamformer):
         Rvv = np.ones((self.half_bin, self.M, self.M),dtype=complex)
         H = np.ones([ self.M,self.half_bin], dtype=complex)
 
-        if WNG:
-            retWNG = np.ones(self.half_bin)
-        if DI:
-            retDI = np.ones(self.half_bin)
+        if retWNG:
+            WNG = np.ones(self.half_bin)
+        else:
+            WNG = None
+        if retDI:
+            DI = np.ones(self.half_bin)
             Fvv = gen_noise_msc(self.M, self.nfft, self.fs, self.r)
+        else:
+            DI = None
+        if retH is None:
+            beampattern = None
 
         alpha = 0.9
 
@@ -110,10 +113,10 @@ class adaptivebeamfomer(beamformer):
                 Rvv[k,:,:] = alpha*Rvv[k,:,:] + (1-alpha)*np.dot(Zxx[:,k,t,np.newaxis],Zxx[:,k,t,np.newaxis].conj().transpose())/(self.win_scale**2)
             a = np.exp(-1j * self.omega[k] * tao)      # propagation vector
             H[:,k,np.newaxis] = self.getweights(a,weightType='MVDR',Rvv=Rvv[k, :, :],Diagonal = 1e-6)
-            if WNG:
-                retWNG[k] = self.calcWNG(a, H[:,k,np.newaxis])
-            if DI:
-                retDI[k] = self.calcDI(a, H[:, k, np.newaxis],Fvv[k,:,:])
+            if retWNG:
+                WNG[k] = self.calcWNG(a, H[:,k,np.newaxis])
+            if retDI:
+                DI[k] = self.calcDI(a, H[:, k, np.newaxis],Fvv[k,:,:])
 
         for t in range(0, Zxx.shape[2]):
             x_fft = np.array(np.conj(H)) * Zxx[:,:,t]
@@ -122,12 +125,12 @@ class adaptivebeamfomer(beamformer):
 
         _, xrec = signal.istft(Zout, self.fs)
 
-        if WNG and DI:
-            return xrec, retWNG, retDI
-        elif WNG:
-            return xrec, retWNG
-        elif DI:
-            return xrec, retDI
-        else:
-            return xrec
+        if retH:
+            beampattern = self.beampattern(self.omega,H)
+
+        return {'out':xrec,
+                'WNG':WNG,
+                'DI':DI,
+                'beampattern':beampattern
+                }
 

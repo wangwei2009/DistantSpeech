@@ -50,3 +50,20 @@ class beamformer(object):
                                     np.real((Hk.conj().T@Fvvk@Hk)))
 
             return 10*np.log10(WNG)
+    def beampattern(self, omega,H):
+            """
+            calculate directive index per frequency bin
+
+            """
+            half_bin = H.shape[1]
+            r = 0.032
+            angle = np.arange(0,360,360)
+            beamout = np.zeros([360,half_bin])
+            for az in range(0,360,1):
+                tao = -1 * r * np.cos(0) * np.cos(az*np.pi/180 - self.gamma) / self.c
+                tao = tao[:,np.newaxis]
+                for k in range(0, half_bin):
+                    a = np.exp(-1j * omega[k] * tao)
+                    beamout[az,k] = np.abs(np.squeeze(H[:,k,np.newaxis].conj().T@a))
+
+            return 10*np.log10(beamout)

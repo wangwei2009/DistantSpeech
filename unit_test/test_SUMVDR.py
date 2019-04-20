@@ -12,6 +12,7 @@ import wave
 import sys
 import numpy as np
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 from scipy.io import wavfile
 from scipy import signal
 import os
@@ -49,16 +50,23 @@ MicArray = MicArray(arrayType='circular', r=0.032, M=4)
 angle = np.array([197, 0]) / 180 * np.pi
 
 fixedbeamformer = fixedbeamfomer(MicArray,frameLen,hop,nfft,c,r,fs)
-yout,WNG,DI = fixedbeamformer.superDirectiveMVDR(x,angle,WNG=True,DI=True)
-yout,WNG,DI = fixedbeamformer.delaysum(x,angle,WNG=True,DI=True)
+yout = fixedbeamformer.superDirectiveMVDR(x,angle,retH=True,retWNG=True,retDI=True)
+
+yout = fixedbeamformer.delaysum(x,angle,retH=True,retWNG=True,retDI=True)
 
 adaptivebeamfomer = adaptivebeamfomer(MicArray,frameLen,hop,nfft,c,r,fs)
-yout,WNG,DI = adaptivebeamfomer.AdaptiveMVDR2(x,angle,WNG=True,DI=True)
+yout = adaptivebeamfomer.AdaptiveMVDR(x,angle,retH=True,retWNG=True,retDI=True)
 
-yout = np.squeeze(yout)
 end = time.clock()
-plt.plot(DI)
+# plt.plot(beampattern[:,59])
+size = yout['beampattern'].shape
+Y = np.arange(0, size[0], 1)
+X = np.arange(0, size[1], 1)
+X,Y=np.meshgrid(X,Y)
+fig1=plt.figure()
+ax = Axes3D(fig1)
+ax.plot_surface(X,Y,yout['beampattern'])
 plt.show()
 # wavfile.write('ds_fft_oop.wav',16000,yout)
-wavfile.write('mvdrpy_stft_oop.wav',16000,yout)
+# wavfile.write('mvdrpy_stft_oop.wav',16000,yout)
 print(end-start)
