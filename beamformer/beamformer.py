@@ -18,7 +18,10 @@ class beamformer(object):
         compute beamformer weights
 
         """
-        if weightType == 'DS':
+        if weightType == 'src':
+            weights = a
+            weights[1:] = 0                             # output channel 1
+        elif weightType == 'DS':
             weights = a/self.M                           # delay-and-sum weights
         elif weightType == 'MVDR':
             if Rvv is None:

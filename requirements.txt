@@ -1,6 +1,6 @@
-Cython
 numpy
-scipy>=0.18.0
+scipy
 matplotlib
 sounddevice
+soundfile
 samplerate

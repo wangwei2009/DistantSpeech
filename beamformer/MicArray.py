@@ -16,6 +16,7 @@ class MicArray(object):
         self.angle = np.array([197, 0]) / 180 * np.pi
         self.gamma = np.arange(0,360,int(360/self.M))* np.pi / 180
 
+
     def getMVDRweight(self,a,Rvv,Diagonal = 1e-3):
         """
         compute MVDR weights
