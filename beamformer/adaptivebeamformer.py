@@ -31,6 +31,110 @@ class adaptivebeamfomer(beamformer):
         self.freq_bin = np.linspace(0, self.half_bin - 1, self.half_bin)
         self.omega = 2 * np.pi * self.freq_bin * self.fs / self.nfft
 
+        self.pad_data = np.zeros([MicArray.M,round(frameLen/2)])
+        self.last_output = np.zeros(round(frameLen / 2))
+
+        self.Fvv = gen_noise_msc(self.M, self.nfft, self.fs, self.r)
+        self.H = np.ones([self.M, self.half_bin], dtype=complex)/self.M
+
+        self.angle = np.array([0, 0]) / 180 * np.pi
+
+        self.method = 'MVDR'
+
+        self.frameCount = 0
+
+    def data_ext(self, x, axis=-1):
+        """
+        pad front of data with self.pad_data
+        """
+        left_ext = self.pad_data
+        ext = np.concatenate((left_ext,
+                              x),
+                             axis=axis)
+        return ext
+
+    def process(self,x,angle, method='MVDR',retH=False,retWNG = False, retDI = False):
+        """
+        MVDR beamformer
+
+        """
+        # x = self.data_ext(x)
+        # self.pad_data = x[:, -1 * round(self.nfft / 2):]
+        frameNum = round((len(x[1, :]) - self.overlap) // self.hop)
+        M = len(x[:, 1])
+
+        outputlength = self.frameLen + (frameNum - 1) * self.hop
+        norm = np.zeros(outputlength, dtype=x.dtype)
+
+        window = windows.hann(self.frameLen, sym=False)
+        # window = np.sqrt(windows.hann(self.frameLen, sym=False))
+        norm[:round(self.nfft / 2)] +=window[round(self.nfft / 2):] ** 2
+        win_scale = np.sqrt(1.0/window.sum()**2)
+
+        tao = -1 * self.r * np.cos(angle[1]) * np.cos(angle[0] - self.gamma) / self.c
+
+        if retWNG:
+            WNG = np.ones(self.half_bin)
+        else:
+            WNG = None
+        if retDI:
+            DI = np.ones(self.half_bin)
+        else:
+            DI = None
+        if retH is False:
+            beampattern = None
+
+        yout = np.zeros(outputlength, dtype=x.dtype)
+
+        Rvv = np.ones((self.half_bin, self.M, self.M), dtype=complex)
+        alpha = 0.9
+
+        for t in range(0, frameNum):
+            xt = x[:, t * self.hop:t * self.hop + self.frameLen] * window
+            Z = np.fft.rfft(xt)#*win_scale
+            if (all(angle == self.angle) is False) or (method != self.method):
+                if method != self.method:
+                    self.method = method
+                    self.frameCount = 0
+            if self.frameCount<200:
+                self.frameCount += 1
+                for k in range(0, self.half_bin):
+                    Rvv[k, :, :] = alpha * Rvv[k, :, :] + (1 - alpha) * np.dot(Z[:, k,np.newaxis],Z[:, k,np.newaxis].conj().transpose())
+
+            if t == 200:
+                for k in range(0, self.half_bin):
+                    a = np.mat(np.exp(-1j * self.omega[k] * tao)).T  # propagation vector
+                    self.H[:, k, np.newaxis] = self.getweights(a, method, Rvv[k, :, :], Diagonal=1e-6)
+
+                    if retWNG:
+                        WNG[k] = self.calcWNG(a, self.H[:, k, np.newaxis])
+                    if retDI:
+                        DI[k] = self.calcDI(a, self.H[:, k, np.newaxis], self.Fvv[k, :, :])
+
+            x_fft = np.array(np.conj(self.H)) * Z
+            yf = np.sum(x_fft, axis=0)
+            Cf = np.fft.irfft(yf)#*window.sum()
+            yout[t * self.hop:t * self.hop + self.frameLen] += Cf#*window
+            norm[..., t * self.hop:t * self.hop + self.frameLen] += window ** 2
+
+
+        norm[..., -1 * round(self.nfft / 2):] += window[:round(self.nfft / 2)] ** 2
+        # yout /= np.where(norm > 1e-10, norm, 1.0)
+
+        yout[:round(self.nfft / 2)] += self.last_output
+        self.last_output = yout[-1 * round(self.nfft / 2):]
+        yout = yout[:-1 * round(self.nfft / 2)]
+
+        # calculate beampattern
+        if retH:
+            beampattern = self.beampattern(self.omega,self.H)
+
+        return {'data':yout,
+                'WNG':WNG,
+                'DI':DI,
+                'beampattern':beampattern
+                }
+
     def AdaptiveMVDR2(self,x,angle):
         """
         MVDR beamformer
