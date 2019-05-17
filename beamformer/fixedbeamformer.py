@@ -32,8 +32,8 @@ class fixedbeamfomer(beamformer):
         self.win_scale = np.sqrt(1.0/self.window.sum()**2)
         self.freq_bin = np.linspace(0, self.half_bin - 1, self.half_bin)
         self.omega = 2 * np.pi * self.freq_bin * self.fs / self.nfft
-        self.pad_data = np.ones([MicArray.M,round(frameLen/2)])
-        self.last_output = np.ones(round(frameLen / 2))
+        self.pad_data = np.zeros([MicArray.M,round(frameLen/2)])
+        self.last_output = np.zeros(round(frameLen / 2))
 
         self.Fvv = gen_noise_msc(self.M, self.nfft, self.fs, self.r)
         self.H = np.ones([self.M, self.half_bin], dtype=complex)
@@ -52,7 +52,7 @@ class fixedbeamfomer(beamformer):
                              axis=axis)
         return ext
 
-    def process(self,x,angle,method='DS'):
+    def process(self,x,angle,method='DS',retH=False,retWNG = False, retDI = False):
         """
         fixed beamformer precesing function
         method:
@@ -67,11 +67,23 @@ class fixedbeamfomer(beamformer):
         outputlength = self.frameLen + (frameNum - 1) * self.hop
         norm = np.zeros(outputlength, dtype=x.dtype)
 
-        window = windows.hamming(self.frameLen, sym=False)
-        norm[:round(self.nfft / 2)] +=window[round(self.nfft / 2):] ** 1
-        win_scale = 1#np.sqrt(1.0/window.sum()**2)
+        # window = windows.hamming(self.frameLen, sym=False)
+        window = np.sqrt(windows.hann(self.frameLen, sym=False))
+        norm[:round(self.nfft / 2)] +=window[round(self.nfft / 2):] ** 2
+        win_scale = np.sqrt(1.0/window.sum()**2)
 
         tao = -1 * self.r * np.cos(angle[1]) * np.cos(angle[0] - self.gamma) / self.c
+
+        if retWNG:
+            WNG = np.ones(self.half_bin)
+        else:
+            WNG = None
+        if retDI:
+            DI = np.ones(self.half_bin)
+        else:
+            DI = None
+        if retH is False:
+            beampattern = None
 
         yout = np.zeros(outputlength, dtype=x.dtype)
 
@@ -82,7 +94,12 @@ class fixedbeamfomer(beamformer):
                 self.method = method
             for k in range(0, self.half_bin):
                 a = np.mat(np.exp(-1j * self.omega[k] * tao)).T  # propagation vector
-                self.H[:, k, np.newaxis] = self.getweights(a,method,self.Fvv[k, :, :])
+                self.H[:, k, np.newaxis] = self.getweights(a,method,self.Fvv[k, :, :],Diagonal=1e-1)
+
+                if retWNG:
+                    WNG[k] = self.calcWNG(a, self.H[:,k,np.newaxis])
+                if retDI:
+                    DI[k] = self.calcDI(a, self.H[:, k, np.newaxis],self.Fvv[k,:,:])
 
         for t in range(0, frameNum):
             xt = x[:, t * self.hop:t * self.hop + self.frameLen] * window
@@ -90,11 +107,11 @@ class fixedbeamfomer(beamformer):
 
             x_fft = np.array(np.conj(self.H)) * Z
             yf = np.sum(x_fft, axis=0)
-            Cf = np.fft.irfft(yf)*1#window.sum()
+            Cf = np.fft.irfft(yf)*window.sum()
             yout[t * self.hop:t * self.hop + self.frameLen] += Cf*window
             norm[..., t * self.hop:t * self.hop + self.frameLen] += window ** 2
 
-        norm[..., -1*round(self.nfft / 2):] +=window[:round(self.nfft / 2)] ** 1
+        norm[..., -1*round(self.nfft / 2):] +=window[:round(self.nfft / 2)] ** 2
         yout /= np.where(norm > 1e-10, norm, 1.0)
 
         yout[:round(self.nfft/2)] += self.last_output
@@ -104,7 +121,16 @@ class fixedbeamfomer(beamformer):
         # update angle
         self.angle = angle
 
-        return yout
+        # calculate beampattern
+        if retH:
+            beampattern = self.beampattern(self.omega,self.H)
+
+        return {'data':yout,
+                'WNG':WNG,
+                'DI':DI,
+                'beampattern':beampattern
+                }
+
 
     def superDirectiveMVDR(self,x,angle,retH=False,retWNG = False, retDI = False):
         """

@@ -46,6 +46,7 @@ class realtime_processing(object):
         angle = np.array([197, 0]) / 180 * np.pi
 
         fixedbeamformer = fixedbeamfomer(Array, frameLen, hop, nfft, c, r, fs)
+        MVDR = adaptivebeamfomer(Array, frameLen, hop, nfft, c, r, fs)
         self._running = True
         self._frames = []
         p = pyaudio.PyAudio()
@@ -80,11 +81,12 @@ class realtime_processing(object):
                     method = 'DS'
                 elif self.method == 2:
                     method = 'MVDR'
-                yout = fixedbeamformer.process(samps[:, 1:5].T, angle,method)
+                # yout = fixedbeamformer.process(samps[:, 1:5].T, angle,method)
+                yout = MVDR.process(samps[:, 1:5].T, angle, method)
 
                 # samps = samps[:, 1]
                 # samps = yout['out']
-                samps = yout
+                samps = yout['data']
                 data = (samps * 32768).astype('<i2').tostring()
                 # data = samps.astype(np.int16).tostring()
                 # end = time.clock()
