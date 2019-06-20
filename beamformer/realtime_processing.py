@@ -81,8 +81,8 @@ class realtime_processing(object):
                     method = 'DS'
                 elif self.method == 2:
                     method = 'MVDR'
-                # yout = fixedbeamformer.process(samps[:, 1:5].T, angle,method)
-                yout = MVDR.process(samps[:, 1:5].T, angle, method)
+                yout = fixedbeamformer.process(samps[:, 1:5].T, angle,method)
+                # yout = MVDR.process(samps[:, 1:5].T, angle, method)
 
                 # samps = samps[:, 1]
                 # samps = yout['out']
