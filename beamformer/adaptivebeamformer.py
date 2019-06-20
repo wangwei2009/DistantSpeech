@@ -43,6 +43,9 @@ class adaptivebeamfomer(beamformer):
 
         self.frameCount = 0
 
+        self.Rvv = np.ones((self.half_bin, self.M, self.M), dtype=complex)
+        self.Ryy = np.ones((self.half_bin, self.M, self.M), dtype=complex)
+
     def data_ext(self, x, axis=-1):
         """
         pad front of data with self.pad_data
@@ -66,8 +69,8 @@ class adaptivebeamfomer(beamformer):
         outputlength = self.frameLen + (frameNum - 1) * self.hop
         norm = np.zeros(outputlength, dtype=x.dtype)
 
-        window = windows.hann(self.frameLen, sym=False)
-        # window = np.sqrt(windows.hann(self.frameLen, sym=False))
+        # window = windows.hann(self.frameLen, sym=False)
+        window = np.sqrt(windows.hann(self.frameLen, sym=False))
         norm[:round(self.nfft / 2)] +=window[round(self.nfft / 2):] ** 2
         win_scale = np.sqrt(1.0/window.sum()**2)
 
@@ -86,7 +89,6 @@ class adaptivebeamfomer(beamformer):
 
         yout = np.zeros(outputlength, dtype=x.dtype)
 
-        Rvv = np.ones((self.half_bin, self.M, self.M), dtype=complex)
         alpha = 0.9
 
         for t in range(0, frameNum):
@@ -99,12 +101,12 @@ class adaptivebeamfomer(beamformer):
             if self.frameCount<200:
                 self.frameCount += 1
                 for k in range(0, self.half_bin):
-                    Rvv[k, :, :] = alpha * Rvv[k, :, :] + (1 - alpha) * np.dot(Z[:, k,np.newaxis],Z[:, k,np.newaxis].conj().transpose())
+                    self.Rvv[k, :, :] = alpha * self.Rvv[k, :, :] + (1 - alpha) * np.dot(Z[:, k,np.newaxis],Z[:, k,np.newaxis].conj().transpose())
 
             if t == 200:
                 for k in range(0, self.half_bin):
                     a = np.mat(np.exp(-1j * self.omega[k] * tao)).T  # propagation vector
-                    self.H[:, k, np.newaxis] = self.getweights(a, method, Rvv[k, :, :], Diagonal=1e-6)
+                    self.H[:, k, np.newaxis] = self.getweights(a, method, Rvv=self.Rvv[k, :, :], Diagonal=1e-6)
 
                     if retWNG:
                         WNG[k] = self.calcWNG(a, self.H[:, k, np.newaxis])
@@ -114,7 +116,7 @@ class adaptivebeamfomer(beamformer):
             x_fft = np.array(np.conj(self.H)) * Z
             yf = np.sum(x_fft, axis=0)
             Cf = np.fft.irfft(yf)#*window.sum()
-            yout[t * self.hop:t * self.hop + self.frameLen] += Cf#*window
+            yout[t * self.hop:t * self.hop + self.frameLen] += Cf*window
             norm[..., t * self.hop:t * self.hop + self.frameLen] += window ** 2
 
 
