@@ -17,8 +17,7 @@ import sounddevice as sd
 import soundfile as sf
 from scipy.io import wavfile
 
-filepath = "E:/work/matlab/Github/beamformer/sound/rec1/"
-# filepath = "E:/work/kws/mycroft-latest/DistantSpeech/unit_test/pcm/"
+filepath = "test_audio/rec1/"
 x,sr = load_wav(filepath)
 sr = 16000
 r = 0.032
