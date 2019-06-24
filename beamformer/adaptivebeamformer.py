@@ -117,6 +117,10 @@ class adaptivebeamfomer(beamformer):
                         DI[k] = self.calcDI(a, self.H[:, k, np.newaxis], self.Fvv[k, :, :])
                 if method == 'TFGSC':
                     self.H[:, k, np.newaxis] = self.getweights(a, method, Rvv=self.Rvv[k, :, :], Ryy=self.Ryy[k, :, :], Diagonal=1e-6)
+                    if retWNG:
+                        WNG[k] = self.calcWNG(a, self.H[:, k, np.newaxis])
+                    if retDI:
+                        DI[k] = self.calcDI(a, self.H[:, k, np.newaxis], self.Fvv[k, :, :])
 
 
             x_fft = np.array(np.conj(self.H)) * Z
