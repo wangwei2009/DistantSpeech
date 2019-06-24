@@ -13,7 +13,7 @@ class beamformer(object):
     def __init__(self):
         pass
 
-    def getweights(self, a, weightType = 'DS', Rvv=None, Diagonal = 1e-3):
+    def getweights(self, a, weightType = 'DS', Rvv=None, Ryy=None, Diagonal = 1e-3):
         """
         compute beamformer weights
 
@@ -31,6 +31,19 @@ class beamformer(object):
             Fvv_k_inv = np.linalg.inv(Fvv_k)
             weights =  Fvv_k_inv @ a / \
                     (a.conj().T @ Fvv_k_inv @ a)  # MVDR weights
+        elif weightType == 'TFGSC':
+            # refer to Jingdong Chen, "Noncausal (Frequency-Domain) Optimal
+            # Filters," in Microphone Array Signal Processing,page.134-135
+            if Rvv is None:
+                warnings.warn("Rvv not provided,using eye(M,M)\n")
+                Rvv = np.eye([self.M,self.M])
+            Fvv_k = (Rvv) + Diagonal * np.eye(self.M)  # Diagonal loading
+            Fvv_k_inv = np.linalg.inv(Fvv_k)
+            u = np.zeros((self.M,1))
+            u[0] = 1
+            temp = Fvv_k_inv @ Ryy
+            weights =  (temp- np.eye(self.M))@u/ \
+                    (np.trace(temp)-self.M)  # FD-TFGSC weights
         else:
             raise ValueError('Unknown beamformer weights: %s' % weightType)
         return weights

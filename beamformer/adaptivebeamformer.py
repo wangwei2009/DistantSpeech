@@ -43,8 +43,8 @@ class adaptivebeamfomer(beamformer):
 
         self.frameCount = 0
 
-        self.Rvv = np.ones((self.half_bin, self.M, self.M), dtype=complex)
-        self.Ryy = np.ones((self.half_bin, self.M, self.M), dtype=complex)
+        self.Rvv = np.zeros((self.half_bin, self.M, self.M), dtype=complex)
+        self.Ryy = np.zeros((self.half_bin, self.M, self.M), dtype=complex)
 
     def data_ext(self, x, axis=-1):
         """
@@ -89,7 +89,8 @@ class adaptivebeamfomer(beamformer):
 
         yout = np.zeros(outputlength, dtype=x.dtype)
 
-        alpha = 0.9
+        alpha_y = 0.8
+        alpha_v = 0.9998
 
         for t in range(0, frameNum):
             xt = x[:, t * self.hop:t * self.hop + self.frameLen] * window
@@ -98,20 +99,25 @@ class adaptivebeamfomer(beamformer):
                 if method != self.method:
                     self.method = method
                     self.frameCount = 0
-            if self.frameCount<200:
-                self.frameCount += 1
-                for k in range(0, self.half_bin):
-                    self.Rvv[k, :, :] = alpha * self.Rvv[k, :, :] + (1 - alpha) * np.dot(Z[:, k,np.newaxis],Z[:, k,np.newaxis].conj().transpose())
 
-            if t == 200:
-                for k in range(0, self.half_bin):
-                    a = np.mat(np.exp(-1j * self.omega[k] * tao)).T  # propagation vector
+            for k in range(0, self.half_bin):
+                a = np.mat(np.exp(-1j * self.omega[k] * tao)).T  # propagation vector
+                # recursive average Ryy
+                self.Ryy[k, :, :] = alpha_y * self.Ryy[k, :, :] + (1 - alpha_y) * np.dot(Z[:, k, np.newaxis],
+                                                                                 Z[:, k, np.newaxis].conj().transpose())
+                if t<200:
+                    # recursive average Rvv
+                    self.Rvv[k, :, :] = alpha_v * self.Rvv[k, :, :] + (1 - alpha_v) * np.dot(Z[:, k,np.newaxis],Z[:, k,np.newaxis].conj().transpose())
+                if method == 'MVDR'and t == 200:
                     self.H[:, k, np.newaxis] = self.getweights(a, method, Rvv=self.Rvv[k, :, :], Diagonal=1e-6)
 
                     if retWNG:
                         WNG[k] = self.calcWNG(a, self.H[:, k, np.newaxis])
                     if retDI:
                         DI[k] = self.calcDI(a, self.H[:, k, np.newaxis], self.Fvv[k, :, :])
+                if method == 'TFGSC':
+                    self.H[:, k, np.newaxis] = self.getweights(a, method, Rvv=self.Rvv[k, :, :], Ryy=self.Ryy[k, :, :], Diagonal=1e-6)
+
 
             x_fft = np.array(np.conj(self.H)) * Z
             yf = np.sum(x_fft, axis=0)
