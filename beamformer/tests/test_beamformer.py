@@ -52,3 +52,9 @@ class TestAdaptiveBeamfomer(TestCase):
         adaptivebeamfomer1 = adaptivebeamfomer(MicArray,frameLen,hop,nfft,c,r,fs)
         yout = adaptivebeamfomer1.process(x,angle,retH=True,retWNG=True,retDI=True)
 
+class TestTFGSC(TestCase):
+
+    def test_adaptivebeamformer(self):
+        adaptivebeamfomer1 = adaptivebeamfomer(MicArray,frameLen,hop,nfft,c,r,fs)
+        yout = adaptivebeamfomer1.process(x,angle,method='TFGSC')
+
