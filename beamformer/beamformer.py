@@ -1,7 +1,5 @@
-from scipy.signal import windows
-from scipy import signal
+
 import numpy as np
-from beamformer.GenNoiseMSC import gen_noise_msc
 from beamformer.MicArray import MicArray
 import warnings
 

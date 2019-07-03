@@ -8,8 +8,6 @@ import numpy as np
 import time
 
 from beamformer.MicArray import MicArray
-from beamformer.fixedbeamformer import fixedbeamfomer
-from beamformer.adaptivebeamformer import adaptivebeamfomer
 from beamformer.utils import mesh,pmesh,load_wav,load_pcm
 from postfilter.postfilter import PostFilter
 
