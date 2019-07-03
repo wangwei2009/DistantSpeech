@@ -6,12 +6,12 @@ from beamformer.MicArray import MicArray
 import warnings
 
 
-class beamformer(object):
+class beamformer(MicArray):
     """
     beamformer base class
     """
-    def __init__(self):
-        pass
+    def __init__(self,mic=MicArray):
+        MicArray.__init__(self,arrayType = mic.arrayType,r = mic.r,M = mic.M)
 
     def getweights(self, a, weightType = 'DS', Rvv=None, Ryy=None, Diagonal = 1e-3):
         """

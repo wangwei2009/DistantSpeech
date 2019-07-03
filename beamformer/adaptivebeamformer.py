@@ -1,13 +1,13 @@
 from scipy.signal import windows
 from scipy import signal
 import numpy as np
-from beamformer.GenNoiseMSC import gen_noise_msc
 from beamformer.MicArray import MicArray
 from beamformer.beamformer import beamformer
 class adaptivebeamfomer(beamformer):
 
     def __init__(self, MicArray,frameLen=256,hop=None,nfft=None,c=343,r=0.032,fs=16000):
 
+        beamformer.__init__(self, MicArray)
         self.MicArray = MicArray
         self.frameLen = frameLen
         if hop is None:
@@ -34,7 +34,6 @@ class adaptivebeamfomer(beamformer):
         self.pad_data = np.zeros([MicArray.M,round(frameLen/2)])
         self.last_output = np.zeros(round(frameLen / 2))
 
-        self.Fvv = gen_noise_msc(self.M, self.nfft, self.fs, self.r)
         self.H = np.ones([self.M, self.half_bin], dtype=complex)/self.M
 
         self.angle = np.array([0, 0]) / 180 * np.pi
@@ -216,7 +215,6 @@ class adaptivebeamfomer(beamformer):
             WNG = None
         if retDI:
             DI = np.ones(self.half_bin)
-            Fvv = gen_noise_msc(self.M, self.nfft, self.fs, self.r)
         else:
             DI = None
         if retH is None:
