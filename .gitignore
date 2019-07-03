@@ -4,7 +4,6 @@
 *.vim
 *.idea
 *.DS_Store
-*.wav
 build/
 docs/_build
 dist/
@@ -15,3 +14,7 @@ venv/
 .vscode/
 
 .venv/
+*.pk
+*/output/*
+*/out/*
+.pytest_cache/*
