@@ -14,7 +14,7 @@ class PostFilter(fixedbeamfomer):
         self.half_bin = 129
         self.NumSpec = int((self.M * self.M - self.M) / 2)
         self.Pxii = np.zeros([self.M,self.half_bin])
-        self.Pxij = np.zeros([self.NumSpec, self.half_bin])
+        self.Pxij = np.zeros([self.NumSpec, self.half_bin], dtype=complex)
         self.H = np.ones([1, self.half_bin], dtype=complex)
 
     def update_CSD_PSD(self, Z:np.ndarray, alpha=0.8):
