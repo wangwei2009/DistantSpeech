@@ -6,10 +6,10 @@ import warnings
 
 class MicArray(object):
 
-    def __init__(self, arrayType = 'circular',r = 0.032,M = 4):
+    def __init__(self, arrayType = 'circular',r = 0.032, c=343, M = 4):
 
         self.arrayType = arrayType
-        self.c = 343
+        self.c = c
         self.r = r
         self.fs = 16000
         self.M = M
@@ -19,9 +19,10 @@ class MicArray(object):
         self.Fvv = gen_noise_msc(self)
 
 
-def gen_noise_msc(mic=MicArray, nfft=256, fs=16000, r=0.032):
+def gen_noise_msc(mic=MicArray, nfft=256, fs=16000):
 
     M = mic.M
+    r = mic.r
     half_bin = round(nfft/2+1)
     Fvv = np.zeros((half_bin, M, M))
     c = 340
