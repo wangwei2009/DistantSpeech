@@ -29,7 +29,7 @@ if __name__ == "__main__":
     fixedbeamformer = fixedbeamformer(MicArray, frameLen, hop, nfft, c, r, fs)
     # yout = fixedbeamformer.superDirectiveMVDR2(x,angle)
 
-    rec = realtime_processing()
+    rec = realtime_processing(EnhancementMehtod=fixedbeamformer,angle=angle)
     rec.audioDevice()
     print("Start processing...\n")
     rec.start()
