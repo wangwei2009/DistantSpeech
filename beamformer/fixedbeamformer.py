@@ -5,7 +5,7 @@ from beamformer.MicArray import MicArray
 from beamformer.beamformer import beamformer
 import warnings
 
-class fixedbeamfomer(beamformer):
+class fixedbeamformer(beamformer):
 
     def __init__(self, MicArray,frameLen=256,hop=None,nfft=None,c=343,r=0.032,fs=16000):
 

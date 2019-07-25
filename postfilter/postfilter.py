@@ -2,14 +2,14 @@ import numpy as np
 from scipy.signal import windows
 from scipy import signal
 from beamformer.beamformer import beamformer
-from beamformer.fixedbeamformer import fixedbeamfomer
+from beamformer.fixedbeamformer import fixedbeamformer
 
 
-class PostFilter(fixedbeamfomer):
+class PostFilter(fixedbeamformer):
 
     def __init__(self, MicArray, frameLen=256, hop=None, nfft=None, c=343, r=0.032, fs=16000):
 
-        fixedbeamfomer.__init__(self, MicArray, frameLen=frameLen, hop=hop, nfft=nfft, c=c, r=r, fs=fs)
+        fixedbeamformer.__init__(self, MicArray, frameLen=frameLen, hop=hop, nfft=nfft, c=c, r=r, fs=fs)
         self.M = MicArray.M
         self.half_bin = 129
         self.NumSpec = int((self.M * self.M - self.M) / 2)

@@ -4,7 +4,7 @@ import time
 import pyaudio
 import numpy as np
 from beamformer.MicArray import MicArray
-from beamformer.fixedbeamformer import fixedbeamfomer
+from beamformer.fixedbeamformer import fixedbeamformer
 from beamformer.adaptivebeamformer import adaptivebeamfomer
 from beamformer.utils import mesh,pmesh,load_wav
 
@@ -26,7 +26,7 @@ if __name__ == "__main__":
     MicArray = MicArray(arrayType='circular', r=0.032, M=4)
     angle = np.array([270, 0]) / 180 * np.pi
 
-    fixedbeamformer = fixedbeamfomer(MicArray, frameLen, hop, nfft, c, r, fs)
+    fixedbeamformer = fixedbeamformer(MicArray, frameLen, hop, nfft, c, r, fs)
     # yout = fixedbeamformer.superDirectiveMVDR2(x,angle)
 
     rec = realtime_processing()
