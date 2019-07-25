@@ -39,7 +39,8 @@ class fixedbeamformer(beamformer):
 
         self.angle = np.array([0, 0]) / 180 * np.pi
 
-        self.method = 'DS'
+        self.AlgorithmList = ['src', 'DS', 'MVDR']
+        self.AlgorithmIndex = 0
 
     def data_ext(self, x, axis=-1):
         """
@@ -51,7 +52,7 @@ class fixedbeamformer(beamformer):
                              axis=axis)
         return ext
 
-    def process(self,x,angle,method='DS',retH=False,retWNG = False, retDI = False):
+    def process(self,x,angle,method=1,retH=False,retWNG = False, retDI = False):
         """
         fixed beamformer precesing function
         method:
@@ -88,12 +89,12 @@ class fixedbeamformer(beamformer):
 
         # Fvv = gen_noise_msc(M, self.nfft, self.fs, self.r)
         # H = np.mat(np.ones([self.half_bin, self.M]), dtype=complex).T
-        if (all(angle == self.angle) is False) or (method!= self.method) :
-            if method!= self.method:
-                self.method = method
+        if (all(angle == self.angle) is False) or (method!= self.AlgorithmIndex) :
+            if method!= self.AlgorithmIndex:
+                self.AlgorithmIndex = method
             for k in range(0, self.half_bin):
                 a = np.mat(np.exp(-1j * self.omega[k] * tao)).T  # propagation vector
-                self.H[:, k, np.newaxis] = self.getweights(a,method,self.Fvv[k, :, :],Diagonal=1e-1)
+                self.H[:, k, np.newaxis] = self.getweights(a,self.AlgorithmList[method],self.Fvv[k, :, :],Diagonal=1e-1)
 
                 if retWNG:
                     WNG[k] = self.calcWNG(a, self.H[:,k,np.newaxis])

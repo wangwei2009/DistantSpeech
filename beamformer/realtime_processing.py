@@ -55,13 +55,7 @@ class realtime_processing(object):
                 samps = np.fromstring(data, dtype='<i2').astype(np.float32, order='C') / 32768.0
                 # start = time.clock()
                 samps = np.reshape(samps, (self.CHUNK, 6))
-                if self.method == 0:
-                    method = 'src'
-                elif self.method == 1:
-                    method = 'DS'
-                elif self.method == 2:
-                    method = 'MVDR'
-                yout = self.EnhancementMethod.process(samps[:, 1:5].T, self.angle,method)
+                yout = self.EnhancementMethod.process(samps[:, 1:5].T, self.angle,self.method)
                 samps = yout['data']
                 data = (samps * 32768).astype('<i2').tostring()
                 # end = time.clock()
