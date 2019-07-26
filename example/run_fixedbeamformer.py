@@ -36,7 +36,7 @@ start = time.clock()
 MicArray = MicArray(arrayType='circular', r=0.032, M=4)
 angle = np.array([197, 0]) / 180 * np.pi
 
-fixedbeamformer = fixedbeamfomer(MicArray,frameLen,hop,nfft,c,r,fs)
+fixedbeamformer = fixedbeamformer(MicArray,frameLen,hop,nfft,c,r,fs)
 # """
 # fixed beamformer precesing function
 # method:
@@ -44,7 +44,7 @@ fixedbeamformer = fixedbeamfomer(MicArray,frameLen,hop,nfft,c,r,fs)
 # 'MVDR': MVDR beamformer under isotropic noise field
 #
 # """
-yout = fixedbeamformer.process(x,angle,method='MVDR',retH=True,retWNG=True,retDI=True)
+yout = fixedbeamformer.process(x,angle,method=2,retH=True,retWNG=True,retDI=True)
 
 end = time.clock()
 print(end-start)
