@@ -27,6 +27,10 @@ def getweghts_coherent(Fvv_est:np.ndarray,Fvv_diffuse:np.ndarray,k,method=3):
     fs = 16000
     nfft = 256
     r = 0.032 * 2
+    GAIN_FLOOR = 0.1
+
+    if method == 0:
+        G = 1        # don't change anything
 
     if method==1:
         # refer to [1]
@@ -34,7 +38,7 @@ def getweghts_coherent(Fvv_est:np.ndarray,Fvv_diffuse:np.ndarray,k,method=3):
         alpha_hi = 2
         beta_low = -0.1
         beta_hi = -0.3
-        mu = 0.05
+        mu = 0.5
         gamma = 0.6
 
         if k <= 16:
@@ -49,10 +53,11 @@ def getweghts_coherent(Fvv_est:np.ndarray,Fvv_diffuse:np.ndarray,k,method=3):
         else:
             G2 = 1
         G = G1 * G2
+        # print("G = \n",G)
     if method==2:
         # refer to [2]
         G = (1 - (np.real(Fvv_est))**2 - np.imag(Fvv_est)**2) / \
-            (2 * (1 - np.real(Fvv_est)))                          # eq.20
+            (2 * (1 - np.real(Fvv_est)))
     if method==3:
         # refer to [3]
         Fvv_UPPER = 0.98
@@ -87,10 +92,61 @@ def getweghts_coherent(Fvv_est:np.ndarray,Fvv_diffuse:np.ndarray,k,method=3):
                    (A ** 2 + B ** 2)                            # eq.21
         G = (Fy_imag - sin_beta * K) / \
                     (sin_alpha - sin_beta)                      # eq.12
-        if G < GAIN_FLOOR:
-            G = GAIN_FLOOR  # *sign(G(k));
-        if G >= 1:
-            G = 1
-        if math.isnan(G):
-            G = GAIN_FLOOR
+    if method==4:
+        # refer to [3]
+        Fvv_UPPER = 0.98
+        GAIN_FLOOR = 0.2
+        Fy_real = np.real(Fvv_est)
+        Fy_imag = np.imag(Fvv_est)
+        Fn = Fvv_diffuse
+
+        if Fy_real > Fvv_UPPER:
+            Fy_real = Fvv_UPPER
+        abs_Fvv_est = np.sqrt(Fy_real ** 2 + Fy_imag ** 2)
+        if abs_Fvv_est > Fvv_UPPER:
+            abs_Fvv_est = Fvv_UPPER
+        if Fn > Fvv_UPPER:
+            Fn = Fvv_UPPER
+
+        DDR = (np.abs(Fn) ** 2 - abs_Fvv_est ** 2) / \
+              (abs_Fvv_est ** 2 - 1)                            # eq.10
+        K = DDR / (DDR + 1)
+        theta_s = 90 * np.pi / 180  # target, endfire
+        theta_i = 0 * np.pi / 180  # interference, broadside
+        constant = 2 * np.pi * k * fs * r / ((nfft * c))
+        sin_alpha = np.sin(constant * np.sin(theta_s))
+        cos_alpha = np.cos(constant * np.sin(theta_s))
+
+        A = sin_alpha * K - Fy_imag
+        B = cos_alpha * K - Fy_real + Fn * (1 - K)              # eq.20
+        C = (Fy_real - Fn * (1 - K)) * sin_alpha - Fy_imag * cos_alpha
+
+        T = K - cos_alpha * (Fy_real - Fn * (1 - K)) - Fy_imag * sin_alpha
+        sin_beta = (-1 * B * C - A * T) / \
+                   (A ** 2 + B ** 2)                            # eq.21
+        cos_beta = (A * C - B * T) / \
+                   (A ** 2 + B ** 2)                            # eq.22
+
+        A_ = cos_alpha - cos_beta
+        B_ = cos_beta + Fn * (1 - K)                            # eq.16
+        C_ = sin_alpha - sin_beta
+        D_ = sin_beta*K
+
+        if np.abs(Fy_imag-sin_alpha)<np.abs(Fy_imag-sin_beta):  # eq.18
+            gamma_ = 1
+        else:
+            gamma_ = -1
+
+        T_ = (abs_Fvv_est**2)*(A_**2+C_**2)-(A_*D_-B_*C_)**2
+
+        G = -1*(A_*B_+C_*D_)+gamma_*np.sqrt(T_) / \
+                    (A_**2+C_**2)                      # eq.17
+
+    if G < GAIN_FLOOR:
+        G = GAIN_FLOOR  # *sign(G(k));
+    if G >= 1:
+        G = 1
+    if math.isnan(G):
+        G = GAIN_FLOOR
+
     return G

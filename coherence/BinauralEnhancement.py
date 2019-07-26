@@ -51,8 +51,11 @@ class BinauralEnhancement(PostFilter):
         :return
             yout:postfilterd output
         """
+        if x.shape[0]==4:
+            x = x[[3,1],:]
         x = self.data_ext(x)
         self.pad_data = x[:, -1 * round(self.nfft / 2):]
+
         frameNum = round((len(x[1, :]) - self.overlap) // self.hop)
         M = len(x[:, 1])
 
@@ -71,10 +74,10 @@ class BinauralEnhancement(PostFilter):
 
         yout = np.zeros(outputlength, dtype=x.dtype)
 
-        if (all(angle == self.angle) is False) or (method!= self.method) :
-            if method!= self.method:
-                self.method = method
-        for t in range(0, frameNum-1):
+        if (all(angle == self.angle) is False) or (method!= self.AlgorithmIndex) :
+            if method!= self.AlgorithmIndex:
+                self.AlgorithmIndex = method
+        for t in range(0, frameNum):
             xt = x[:, t * self.hop:t * self.hop + self.frameLen] * window
             Z = np.fft.rfft(xt)#*win_scale
 
