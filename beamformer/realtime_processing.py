@@ -9,7 +9,7 @@ import pyaudio
 import numpy as np
 from beamformer.fixedbeamformer import fixedbeamformer
 from beamformer.adaptivebeamformer import adaptivebeamfomer
-
+import webrtcvad
 
 class realtime_processing(object):
     def __init__(self, EnhancementMehtod=fixedbeamformer, angle=0,chunk=1024, channels=6, rate=16000):
@@ -23,6 +23,7 @@ class realtime_processing(object):
         self.method = 0
         self.EnhancementMethod = EnhancementMehtod
         self.angle = angle
+        self.vad = webrtcvad.Vad(3)
 
     def audioDevice(self):
         pass
@@ -52,6 +53,8 @@ class realtime_processing(object):
         while (self._running):
             data = stream.read(self.CHUNK)
             if self.CHANNELS == 6:
+                # if self.vad.is_speech(data[0::6].tobytes(), 16000)==False:
+                #     print("noise\n")
                 samps = np.fromstring(data, dtype='<i2').astype(np.float32, order='C') / 32768.0
                 # start = time.clock()
                 samps = np.reshape(samps, (self.CHUNK, 6))

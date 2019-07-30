@@ -41,9 +41,14 @@ class adaptivebeamfomer(beamformer):
         self.method = 'MVDR'
 
         self.frameCount = 0
+        self.calc = 0
+        self.estPos = 200
 
         self.Rvv = np.zeros((self.half_bin, self.M, self.M), dtype=complex)
         self.Ryy = np.zeros((self.half_bin, self.M, self.M), dtype=complex)
+
+        self.AlgorithmList = ['src', 'DS', 'MVDR', 'TFGSC']
+        self.AlgorithmIndex = 0
 
     def data_ext(self, x, axis=-1):
         """
@@ -55,13 +60,13 @@ class adaptivebeamfomer(beamformer):
                              axis=axis)
         return ext
 
-    def process(self,x,angle, method='MVDR',retH=False,retWNG = False, retDI = False):
+    def process(self,x,angle, method=2,retH=False,retWNG = False, retDI = False):
         """
         MVDR beamformer
 
         """
-        # x = self.data_ext(x)
-        # self.pad_data = x[:, -1 * round(self.nfft / 2):]
+        x = self.data_ext(x)
+        self.pad_data = x[:, -1 * round(self.nfft / 2):]
         frameNum = round((len(x[1, :]) - self.overlap) // self.hop)
         M = len(x[:, 1])
 
@@ -94,28 +99,38 @@ class adaptivebeamfomer(beamformer):
         for t in range(0, frameNum):
             xt = x[:, t * self.hop:t * self.hop + self.frameLen] * window
             Z = np.fft.rfft(xt)#*win_scale
-            if (all(angle == self.angle) is False) or (method != self.method):
-                if method != self.method:
-                    self.method = method
-                    self.frameCount = 0
+            if (all(angle == self.angle) is False) or (method != self.AlgorithmIndex):
+                # update look angle and algorithm
+                if all(angle == self.angle) is False:
+                    self.angle = angle
+                if method != self.AlgorithmIndex:
+                    self.AlgorithmIndex = method
+                    if method == 0:
+                        self.H = np.ones([self.M, self.half_bin], dtype=complex) / self.M
+                # reset flag
+                self.frameCount = 0
+                self.calc = 0
 
             for k in range(0, self.half_bin):
                 a = np.mat(np.exp(-1j * self.omega[k] * tao)).T  # propagation vector
                 # recursive average Ryy
                 self.Ryy[k, :, :] = alpha_y * self.Ryy[k, :, :] + (1 - alpha_y) * np.dot(Z[:, k, np.newaxis],
                                                                                  Z[:, k, np.newaxis].conj().transpose())
-                if t<200:
+                if self.frameCount<self.estPos:
                     # recursive average Rvv
                     self.Rvv[k, :, :] = alpha_v * self.Rvv[k, :, :] + (1 - alpha_v) * np.dot(Z[:, k,np.newaxis],Z[:, k,np.newaxis].conj().transpose())
-                if method == 'MVDR'and t == 200:
-                    self.H[:, k, np.newaxis] = self.getweights(a, method, Rvv=self.Rvv[k, :, :], Diagonal=1e-6)
+                if self.AlgorithmList[method] == 'MVDR'and self.frameCount == 200 and self.calc == 0:
+                    if k == self.half_bin-1:
+                        self.calc = 1
+                    # print("calculating MVDR weights...\n")
+                    self.H[:, k, np.newaxis] = self.getweights(a, self.AlgorithmList[method], Rvv=self.Rvv[k, :, :], Diagonal=1e-6)
 
                     if retWNG:
                         WNG[k] = self.calcWNG(a, self.H[:, k, np.newaxis])
                     if retDI:
                         DI[k] = self.calcDI(a, self.H[:, k, np.newaxis], self.Fvv[k, :, :])
-                if method == 'TFGSC':
-                    self.H[:, k, np.newaxis] = self.getweights(a, method, Rvv=self.Rvv[k, :, :], Ryy=self.Ryy[k, :, :], Diagonal=1e-6)
+                if self.AlgorithmList[method] == 'TFGSC':
+                    self.H[:, k, np.newaxis] = self.getweights(a, self.AlgorithmList[method], Rvv=self.Rvv[k, :, :], Ryy=self.Ryy[k, :, :], Diagonal=1e-6)
                     if retWNG:
                         WNG[k] = self.calcWNG(a, self.H[:, k, np.newaxis])
                     if retDI:
@@ -128,7 +143,8 @@ class adaptivebeamfomer(beamformer):
             yout[t * self.hop:t * self.hop + self.frameLen] += Cf*window
             norm[..., t * self.hop:t * self.hop + self.frameLen] += window ** 2
 
-
+            if self.frameCount< self.estPos:
+                self.frameCount = self.frameCount + 1
         norm[..., -1 * round(self.nfft / 2):] += window[:round(self.nfft / 2)] ** 2
         # yout /= np.where(norm > 1e-10, norm, 1.0)
 

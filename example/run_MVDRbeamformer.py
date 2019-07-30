@@ -36,7 +36,7 @@ MicArray = MicArray(arrayType='circular', r=0.032, M=4)
 angle = np.array([197, 0]) / 180 * np.pi
 
 adaptivebeamfomer = adaptivebeamfomer(MicArray,frameLen,hop,nfft,c,r,fs)
-yout = adaptivebeamfomer.process(x,angle,retH=True,retWNG=True,retDI=True)
+yout = adaptivebeamfomer.process(x,angle, method=2, retH=True,retWNG=True,retDI=True)
 
 end = time.clock()
 print(end-start)
