@@ -45,6 +45,7 @@ class adaptivebeamfomer(beamformer):
         self.estPos = 200
 
         self.Rvv = np.zeros((self.half_bin, self.M, self.M), dtype=complex)
+        self.Rvv_inv = np.zeros((self.half_bin, self.M, self.M), dtype=complex)
         self.Ryy = np.zeros((self.half_bin, self.M, self.M), dtype=complex)
 
         self.AlgorithmList = ['src', 'DS', 'MVDR', 'TFGSC']
@@ -62,7 +63,7 @@ class adaptivebeamfomer(beamformer):
 
     def process(self,x,angle, method=2,retH=False,retWNG = False, retDI = False):
         """
-        MVDR beamformer
+        beamformer process function
 
         """
         x = self.data_ext(x)
@@ -105,8 +106,6 @@ class adaptivebeamfomer(beamformer):
                     self.angle = angle
                 if method != self.AlgorithmIndex:
                     self.AlgorithmIndex = method
-                    if method == 0:
-                        self.H = np.ones([self.M, self.half_bin], dtype=complex) / self.M
                 # reset flag
                 self.frameCount = 0
                 self.calc = 0
@@ -119,18 +118,20 @@ class adaptivebeamfomer(beamformer):
                 if self.frameCount<self.estPos:
                     # recursive average Rvv
                     self.Rvv[k, :, :] = alpha_v * self.Rvv[k, :, :] + (1 - alpha_v) * np.dot(Z[:, k,np.newaxis],Z[:, k,np.newaxis].conj().transpose())
-                if self.AlgorithmList[method] == 'MVDR'and self.frameCount == 200 and self.calc == 0:
+                if self.frameCount == 200 and self.calc == 0:
                     if k == self.half_bin-1:
                         self.calc = 1
                     # print("calculating MVDR weights...\n")
-                    self.H[:, k, np.newaxis] = self.getweights(a, self.AlgorithmList[method], Rvv=self.Rvv[k, :, :], Diagonal=1e-6)
+                    Diagonal = 1e-6
+                    Rvv_k = (self.Rvv[k, :, :]) + Diagonal * np.eye(self.M)  # Diagonal loading
+                    self.Rvv_inv[k,:,:] = np.linalg.inv(Rvv_k)
+                    self.H[:, k, np.newaxis] = self.getweights(a,
+                                                               self.AlgorithmList[method],
+                                                               Rvv=self.Rvv[k, :, :],
+                                                               Rvv_inv=self.Rvv_inv[k,:,:],
+                                                               Ryy=self.Ryy[k, :, :],
+                                                               Diagonal=Diagonal)
 
-                    if retWNG:
-                        WNG[k] = self.calcWNG(a, self.H[:, k, np.newaxis])
-                    if retDI:
-                        DI[k] = self.calcDI(a, self.H[:, k, np.newaxis], self.Fvv[k, :, :])
-                if self.AlgorithmList[method] == 'TFGSC':
-                    self.H[:, k, np.newaxis] = self.getweights(a, self.AlgorithmList[method], Rvv=self.Rvv[k, :, :], Ryy=self.Ryy[k, :, :], Diagonal=1e-6)
                     if retWNG:
                         WNG[k] = self.calcWNG(a, self.H[:, k, np.newaxis])
                     if retDI:

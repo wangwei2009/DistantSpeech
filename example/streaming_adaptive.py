@@ -1,4 +1,6 @@
-
+"""
+  stream test for adaptive beamformer
+"""
 
 import time
 import pyaudio
@@ -19,10 +21,10 @@ if __name__ == "__main__":
     overlap = frameLen - hop
     nfft = 256
     c = 343
-    r = 0.032*2
+    r = 0.032
     fs = 16000
 
-    MicArray = MicArray(arrayType='linear', r=r, c=c, M=2)
+    MicArray = MicArray(arrayType='circular', r=r, c=c, M=4)
     angle = np.array([270, 0]) / 180 * np.pi
 
     adaptivebeamfomer = adaptivebeamfomer(MicArray, frameLen, hop, nfft, c, r, fs)
@@ -32,6 +34,6 @@ if __name__ == "__main__":
     print("Start processing...\n")
     rec.start()
     while True:
-        a = int(input('"select algorithm: \n0.src  \n1.delaysum  \n2.supperdirective\n'))
+        a = int(input('"select algorithm: \n0.src  \n1.delaysum  \n2.MVDR  \n3.TFGSC  \n'))
         rec.changeAlgorithm(a)
         # time.sleep(0.1)

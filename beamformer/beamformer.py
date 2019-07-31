@@ -11,32 +11,31 @@ class beamformer(MicArray):
     def __init__(self,mic=MicArray):
         MicArray.__init__(self,arrayType = mic.arrayType,r = mic.r,M = mic.M)
 
-    def getweights(self, a, weightType = 'DS', Rvv=None, Ryy=None, Diagonal = 1e-3):
+    def getweights(self, a, weightType = 'DS', Rvv=None, Rvv_inv=None,Ryy=None, Diagonal = 1e-3):
         """
         compute beamformer weights
 
         """
+        if Rvv is None:
+            warnings.warn("Rvv not provided,using eye(M,M)\n")
+            Rvv = np.eye([self.M, self.M])
+        if Rvv_inv is None:
+            Fvv_k = (Rvv) + Diagonal * np.eye(self.M)  # Diagonal loading
+            Fvv_k_inv = np.linalg.inv(Fvv_k)
+        else:
+            Fvv_k_inv = Rvv_inv
+
         if weightType == 'src':
             weights = a
             weights[1:] = 0                             # output channel 1
         elif weightType == 'DS':
             weights = a/self.M                           # delay-and-sum weights
         elif weightType == 'MVDR':
-            if Rvv is None:
-                warnings.warn("Rvv not provided,using eye(M,M)\n")
-                Rvv = np.eye([self.M,self.M])
-            Fvv_k = (Rvv) + Diagonal * np.eye(self.M)  # Diagonal loading
-            Fvv_k_inv = np.linalg.inv(Fvv_k)
             weights =  Fvv_k_inv @ a / \
                     (a.conj().T @ Fvv_k_inv @ a)  # MVDR weights
         elif weightType == 'TFGSC':
             # refer to Jingdong Chen, "Noncausal (Frequency-Domain) Optimal
             # Filters," in Microphone Array Signal Processing,page.134-135
-            if Rvv is None:
-                warnings.warn("Rvv not provided,using eye(M,M)\n")
-                Rvv = np.eye([self.M,self.M])
-            Fvv_k = (Rvv) + Diagonal * np.eye(self.M)  # Diagonal loading
-            Fvv_k_inv = np.linalg.inv(Fvv_k)
             u = np.zeros((self.M,1))
             u[0] = 1
             temp = Fvv_k_inv @ Ryy
