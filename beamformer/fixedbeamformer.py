@@ -16,7 +16,7 @@ class fixedbeamformer(beamformer):
             self.hop = int(frameLen//2)
         else:
             self.hop = int(hop)
-        self.overlap = frameLen - hop
+        self.overlap = frameLen - self.hop
         if nfft is None:
             self.nfft = int(frameLen)
         else:
@@ -24,7 +24,7 @@ class fixedbeamformer(beamformer):
         self.c = c
         self.r = r
         self.fs = fs
-        self.half_bin = round(nfft / 2 + 1)
+        self.half_bin = round(self.nfft / 2 + 1)
         self.M = 4
         self.angle = np.array([197, 0]) / 180 * np.pi
         self.gamma = MicArray.gamma
