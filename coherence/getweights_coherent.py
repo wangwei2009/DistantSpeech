@@ -17,6 +17,9 @@ see reference below to get more details
 .. [3] Ji, Y., Byun, J., Park, Y. (2017) Coherence-Based Dual-Channel Noise Reduction
     Algorithm in a Complex Noisy Environment. Proc. Interspeech 2017
 
+.. [4] Yousefian, N., & Loizou, P. C. (2013). A Dual-Microphone Algorithm That Can Cope
+     With Competing-Talker Scenarios. IEEE Transactions on Audio, Speech, and Language Processing
+
 '''
 import numpy as np
 import math
@@ -141,6 +144,34 @@ def getweghts_coherent(Fvv_est:np.ndarray,Fvv_diffuse:np.ndarray,k,method=3):
 
         G = -1*(A_*B_+C_*D_)+gamma_*np.sqrt(T_) / \
                     (A_**2+C_**2)                      # eq.17
+
+    if method==5:
+        # refer to [4]
+        Fy_real = np.real(Fvv_est)
+        Fy_imag = np.imag(Fvv_est)
+        Fn = Fvv_diffuse
+        d = r
+
+        theta = 90 * np.pi / 180 # interference broadside
+        ata = 0 * np.pi / 180 # target endfire
+        omega = 2 * np.pi * (k - 1) / nfft
+        tao = fs * d / c
+        omega_ = omega * tao
+        beta = omega_ * np.cos(ata)
+        alpha = omega_ * np.cos(theta)
+        constant = 2 * np.pi * k * fs * d / ((nfft * c))
+
+        A = Fy_imag - np.sin(omega_)
+        B = np.cos(omega_) - Fy_real
+        C = Fy_real * np.sin(omega_) - Fy_imag * np.cos(omega_)
+        T = 1 - Fy_real * np.cos(omega_) - Fy_imag * np.sin(omega_)
+
+        sin_alpha = (-1 * B * C + A * T) / \
+                     (A ** 2 + B **2) # eq.14
+        SNR = (sin_alpha - Fy_imag) /\
+        (Fy_imag - np.sin(beta)) # eq.10
+        G = np.sqrt(SNR /
+             (SNR + 1))
 
     if G < GAIN_FLOOR:
         G = GAIN_FLOOR  # *sign(G(k));
