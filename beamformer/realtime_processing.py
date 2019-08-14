@@ -10,6 +10,7 @@ import numpy as np
 from beamformer.fixedbeamformer import fixedbeamformer
 from beamformer.adaptivebeamformer import adaptivebeamfomer
 import webrtcvad
+from vad.vad import vad
 
 class realtime_processing(object):
     def __init__(self, EnhancementMehtod=fixedbeamformer, angle=0,chunk=1024, channels=6, rate=16000):
@@ -53,11 +54,11 @@ class realtime_processing(object):
         while (self._running):
             data = stream.read(self.CHUNK)
             if self.CHANNELS == 6:
-                # if self.vad.is_speech(data[0::6].tobytes(), 16000)==False:
-                #     print("noise\n")
+
                 samps = np.fromstring(data, dtype='<i2').astype(np.float32, order='C') / 32768.0
                 # start = time.clock()
                 samps = np.reshape(samps, (self.CHUNK, 6))
+                print(vad())
                 yout = self.EnhancementMethod.process(samps[:, 1:5].T, self.angle,self.method)
                 samps = yout['data']
                 data = (samps * 32768).astype('<i2').tostring()
