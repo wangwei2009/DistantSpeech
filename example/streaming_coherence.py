@@ -28,11 +28,17 @@ if __name__ == "__main__":
     dualMIC_Enhancement = BinauralEnhancement(MicArray, frameLen, hop, nfft, c, r, fs)
     # yout = fixedbeamformer.superDirectiveMVDR2(x,angle)
 
-    rec = realtime_processing(EnhancementMehtod=dualMIC_Enhancement,angle=angle)
+    rec = realtime_processing(EnhancementMehtod=dualMIC_Enhancement,chunk=4096, angle=angle)
     rec.audioDevice()
     print("Start processing...\n")
     rec.start()
     while True:
-        a = int(input('"select algorithm: \n0.src  \n1.delaysum  \n2.supperdirective\n'))
+        a = int(input('"select algorithm: \n'
+                      '0.src  \n'
+                      '1.coherence:endfire  \n'
+                      '2.coherence:broadside \n'
+                      '3.coherence:endfire complex-m1 \n'
+                      '4.coherence:endfire complex-m3 \n'
+                      '5.coherence:endfire Competing-Talker \n'))
         rec.changeAlgorithm(a)
         # time.sleep(0.1)
