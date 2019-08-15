@@ -58,8 +58,12 @@ class realtime_processing(object):
                 samps = np.fromstring(data, dtype='<i2').astype(np.float32, order='C') / 32768.0
                 # start = time.clock()
                 samps = np.reshape(samps, (self.CHUNK, 6))
-                print(vad())
-                yout = self.EnhancementMethod.process(samps[:, 1:5].T, self.angle,self.method)
+                if vad():
+                    is_speech = 1
+                    print("speech detected!!!\n")
+                else:
+                    is_speech = 0
+                yout = self.EnhancementMethod.process(samps[:, 1:5].T, self.angle,self.method,vadFlag=is_speech)
                 samps = yout['data']
                 data = (samps * 32768).astype('<i2').tostring()
                 # end = time.clock()

@@ -94,6 +94,8 @@ class GSC(beamformer):
         norm[:round(self.nfft / 2)] +=window[round(self.nfft / 2):] ** 2
         win_scale = np.sqrt(1.0/window.sum()**2)
 
+        tao = -1 * self.r * np.cos(angle[1]) * np.cos(angle[0] - self.gamma) / self.c
+
         if retWNG:
             WNG = np.ones(self.half_bin)
         else:
@@ -111,7 +113,7 @@ class GSC(beamformer):
         alpha_v = 0.9998
 
         mu = 0.01
-        rho = 0.95
+        rho = 0.998
 
         if vadFlag is not None:
             is_speech = vadFlag
@@ -167,22 +169,29 @@ class GSC(beamformer):
                 # print("calculating MVDR weights...\n")
                 Diagonal = 1e-6
 
-                # generate the reference noise signals
-                self.U[:,k] = np.squeeze(self.BM[:,:,k]).conj().T@Z[:,k]
-                # fixed beamformer output
-                self.Yfbf[k] = self.W[:,k].conj().T@Z[:,k]
-                # residual output
-                Y[k] = self.Yfbf[k] - self.G[:,k].conj().T@self.U[:,k]
-                # noise segment,update parameter
-                if self.calc:
-                    self.Pest[k] = 1 # rho * Pest(k) + (1 - rho) * sum(Z(:, k).^ 2)
-                    # update MNC weights
-                    self.G[:,k] = self.G[:,k]+mu * self.U[:,k]*Y[k].conj() / self.Pest[k]
+                if self.AlgorithmIndex == 0:
+                    Y[k] = Z[0, k] # output channel_1
+                else:
+                    # generate the reference noise signals
+                    self.U[:, k] = np.squeeze(self.BM[:, :, k]).conj().T @ Z[:, k]
+                    # fixed beamformer output
+                    self.Yfbf[k] = self.W[:, k].conj().T @ Z[:, k]
 
-                    if retWNG:
-                        WNG[k] = self.calcWNG(a, self.H[:, k, np.newaxis])
-                    if retDI:
-                        DI[k] = self.calcDI(a, self.H[:, k, np.newaxis], self.Fvv[k, :, :])
+                    # residual output
+                    Y[k] = self.Yfbf[k] - self.G[:,k].conj().T@self.U[:,k]
+
+                    # noise segment,update parameter
+                    # if self.calc:
+                    if is_speech==0:
+                        # print("updating\n")
+                        self.Pest[k] = 1 #rho * self.Pest[k] + (1 - rho) * np.sum(np.power(np.abs(Z[:,k]),2))
+                        # update MNC weights
+                        self.G[:,k] = self.G[:,k]+mu * self.U[:,k]*Y[k].conj() / self.Pest[k]
+
+                        if retWNG:
+                            WNG[k] = self.calcWNG(a, self.H[:, k, np.newaxis])
+                        if retDI:
+                            DI[k] = self.calcDI(a, self.H[:, k, np.newaxis], self.Fvv[k, :, :])
 
             Cf = np.fft.irfft(Y)#*window.sum()
             yout[t * self.hop:t * self.hop + self.frameLen] += Cf*window
