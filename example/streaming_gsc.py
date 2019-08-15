@@ -30,7 +30,7 @@ if __name__ == "__main__":
 
     GSC_1 = GSC(MicArray, frameLen, hop, nfft, c, r, fs)
 
-    rec = realtime_processing(EnhancementMehtod=GSC_1,angle=angle)
+    rec = realtime_processing(EnhancementMehtod=GSC_1,angle=angle,Recording=True)
     rec.audioDevice()
     print("Start processing...\n")
     rec.start()
@@ -38,5 +38,11 @@ if __name__ == "__main__":
         a = int(input('"select algorithm: \n'
                       '0.src  \n'
                       '1.GSC  \n'))
-        rec.changeAlgorithm(a)
+        if a==9:
+            filename = 'output/rec1.wav'
+            print('\nRecording finished: ' + repr(filename))
+            rec.stop()
+            rec.save(filename)
+            break
+    rec.changeAlgorithm(a)
         # time.sleep(0.1)

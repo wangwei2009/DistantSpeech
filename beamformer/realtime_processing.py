@@ -13,7 +13,7 @@ import webrtcvad
 from vad.vad import vad
 
 class realtime_processing(object):
-    def __init__(self, EnhancementMehtod=fixedbeamformer, angle=0,chunk=1024, channels=6, rate=16000):
+    def __init__(self, EnhancementMehtod=fixedbeamformer, angle=0,chunk=1024, channels=6, rate=16000,Recording=False):
         self.CHUNK = chunk
         self.FORMAT = pyaudio.paInt16
         self.CHANNELS = channels
@@ -21,15 +21,18 @@ class realtime_processing(object):
         self._running = True
         self._frames = []
         self.input_device_index = 0
-        self.method = 0
+        self.method = 1
         self.EnhancementMethod = EnhancementMehtod
         self.angle = angle
         self.vad = webrtcvad.Vad(3)
+        self.isRecording = Recording
 
     def audioDevice(self):
         pass
 
     def start(self):
+        if self.isRecording:
+            print('Recording...\n')
         threading._start_new_thread(self.__recording, ())
 
     def __recording(self):
@@ -53,21 +56,25 @@ class realtime_processing(object):
                         frames_per_buffer=self.CHUNK)
         while (self._running):
             data = stream.read(self.CHUNK)
+            MultiChannelData = np.zeros((self.CHUNK, 6), dtype=float)
             if self.CHANNELS == 6:
 
                 samps = np.fromstring(data, dtype='<i2').astype(np.float32, order='C') / 32768.0
                 # start = time.clock()
-                samps = np.reshape(samps, (self.CHUNK, 6))
+                MultiChannelData = np.reshape(samps, (self.CHUNK, 6))
                 if vad():
                     is_speech = 1
                     print("speech detected!!!\n")
                 else:
                     is_speech = 0
-                yout = self.EnhancementMethod.process(samps[:, 1:5].T, self.angle,self.method,vadFlag=is_speech)
-                samps = yout['data']
-                data = (samps * 32768).astype('<i2').tostring()
+                yout = self.EnhancementMethod.process(MultiChannelData[:, 1:5].T, self.angle,self.method,vadFlag=is_speech)
+                MultiChannelData[:,5] = yout['data']
+                data = (MultiChannelData[:,5] * 32768).astype('<i2').tostring()
                 # end = time.clock()
                 # print(end - start, '\n')
+                if self.isRecording:
+                    MultiChannelPCM = (MultiChannelData * 32768).astype('<i2').tostring()
+                    self._frames.append(MultiChannelPCM)
 
             streamOut.write(data, self.CHUNK)  # play back audio stream
 
@@ -86,7 +93,7 @@ class realtime_processing(object):
         if not filename.endswith(".wav"):
             filename = filename + ".wav"
         wf = wave.open(filename, 'wb')
-        wf.setnchannels(1)
+        wf.setnchannels(6)
         wf.setsampwidth(p.get_sample_size(self.FORMAT))
         wf.setframerate(self.RATE)
         wf.writeframes(b''.join(self._frames))
