@@ -3,6 +3,7 @@ from scipy import signal
 import numpy as np
 from beamformer.MicArray import MicArray
 from beamformer.beamformer import beamformer
+from vad.vad import vad
 
 class GSC(beamformer):
 
@@ -76,7 +77,7 @@ class GSC(beamformer):
                              axis=axis)
         return ext
 
-    def process(self,x,angle, method=2,retH=False,retWNG = False, retDI = False,vadFlag=None):
+    def process(self,x,angle, method=2,retH=False,retWNG = False, retDI = False):
         """
         beamformer process function
 
@@ -115,8 +116,9 @@ class GSC(beamformer):
         mu = 0.01
         rho = 0.998
 
-        if vadFlag is not None:
-            is_speech = vadFlag
+        if vad():
+            is_speech = 1
+            print("speech detected!!!\n")
         else:
             is_speech = 0
 

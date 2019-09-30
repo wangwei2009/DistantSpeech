@@ -8,9 +8,6 @@ import time
 import pyaudio
 import numpy as np
 from beamformer.fixedbeamformer import fixedbeamformer
-from beamformer.adaptivebeamformer import adaptivebeamfomer
-import webrtcvad
-from vad.vad import vad
 
 class realtime_processing(object):
     def __init__(self, EnhancementMehtod=fixedbeamformer, angle=0,chunk=1024, channels=6, rate=16000,Recording=False):
@@ -21,10 +18,9 @@ class realtime_processing(object):
         self._running = True
         self._frames = []
         self.input_device_index = 0
-        self.method = 1
+        self.method = 0
         self.EnhancementMethod = EnhancementMehtod
         self.angle = angle
-        self.vad = webrtcvad.Vad(3)
         self.isRecording = Recording
 
     def audioDevice(self):
@@ -62,12 +58,8 @@ class realtime_processing(object):
                 samps = np.fromstring(data, dtype='<i2').astype(np.float32, order='C') / 32768.0
                 # start = time.clock()
                 MultiChannelData = np.reshape(samps, (self.CHUNK, 6))
-                if vad():
-                    is_speech = 1
-                    print("speech detected!!!\n")
-                else:
-                    is_speech = 0
-                yout = self.EnhancementMethod.process(MultiChannelData[:, 1:5].T, self.angle,self.method,vadFlag=is_speech)
+
+                yout = self.EnhancementMethod.process(MultiChannelData[:, 1:5].T, self.angle,self.method)
                 MultiChannelData[:,5] = yout['data']
                 data = (MultiChannelData[:,5] * 32768).astype('<i2').tostring()
                 # end = time.clock()
