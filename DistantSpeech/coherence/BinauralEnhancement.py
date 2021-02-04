@@ -1,8 +1,8 @@
 import numpy as np
 import math
 from scipy.signal import windows
-from coherence.getweights_coherent import getweghts_coherent
-from postfilter.postfilter import PostFilter
+from .getweights_coherent import getweghts_coherent
+from ..postfilter.postfilter import PostFilter
 
 
 class BinauralEnhancement(PostFilter):

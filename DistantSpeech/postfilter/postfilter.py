@@ -1,8 +1,8 @@
 import numpy as np
 from scipy.signal import windows
 from scipy import signal
-from beamformer.beamformer import beamformer
-from beamformer.fixedbeamformer import fixedbeamformer
+from DistantSpeech.beamformer.beamformer import beamformer
+from DistantSpeech.beamformer.fixedbeamformer import fixedbeamformer
 
 
 class PostFilter(fixedbeamformer):

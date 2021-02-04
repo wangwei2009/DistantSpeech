@@ -6,18 +6,21 @@ Test coherence-based dual-mic speech enhancement
 import numpy as np
 
 import time
+import os
+import sys
 
-from beamformer.MicArray import MicArray
-from beamformer.utils import mesh,pmesh,load_wav,load_pcm
-from coherence.BinauralEnhancement import BinauralEnhancement
+from DistantSpeech.beamformer.MicArray import MicArray
+from DistantSpeech.beamformer.utils import mesh,pmesh,load_wav,load_pcm
+from DistantSpeech.coherence.BinauralEnhancement import BinauralEnhancement
 
 import matplotlib.pyplot as plt
 import sounddevice as sd
 import soundfile as sf
 from scipy.io import wavfile
 
-filepath = "test_audio/rec/"
-x,sr = load_wav(filepath)
+filepath = "test_audio/rec1/"
+print(os.chdir(sys.path[0]))
+x,sr = load_wav(os.path.abspath(filepath))
 # x = x[::2,:]
 x = x[[3,1],:]
 sr = 16000
