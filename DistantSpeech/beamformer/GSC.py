@@ -1,8 +1,8 @@
 from scipy.signal import windows
 from scipy import signal
 import numpy as np
-from beamformer.MicArray import MicArray
-from beamformer.beamformer import beamformer
+from .MicArray import MicArray
+from .beamformer import beamformer
 from vad.vad import vad
 
 class GSC(beamformer):
@@ -116,11 +116,11 @@ class GSC(beamformer):
         mu = 0.01
         rho = 0.998
 
-        if vad():
-            is_speech = 1
-            print("speech detected!!!\n")
-        else:
-            is_speech = 0
+        # if vad():
+        #     is_speech = 1
+        #     print("speech detected!!!\n")
+        # else:
+        #     is_speech = 0
 
         if (all(angle == self.angle) is False) or (method != self.AlgorithmIndex):
             # update look angle and algorithm
@@ -154,6 +154,11 @@ class GSC(beamformer):
                 # reset flag
                 self.frameCount = 0
                 self.calc = 1
+
+            if t < 1000:
+                is_speech = 0
+            else:
+                is_speech = 1
 
             for k in range(0, self.half_bin):
                 a = np.mat(np.exp(-1j * self.omega[k] * tao)).T  # propagation vector
