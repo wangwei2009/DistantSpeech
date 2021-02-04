@@ -4,21 +4,26 @@ Test beamformer
 """
 
 import numpy as np
+import os
+import sys
 
 import time
 
-from beamformer.MicArray import MicArray
-from beamformer.fixedbeamformer import fixedbeamformer
-from beamformer.adaptivebeamformer import adaptivebeamfomer
-from beamformer.utils import mesh,pmesh,load_wav,load_pcm
+from DistantSpeech.beamformer.MicArray import MicArray
+from DistantSpeech.beamformer.fixedbeamformer import fixedbeamformer
+from DistantSpeech.beamformer.adaptivebeamformer import adaptivebeamfomer
+from DistantSpeech.beamformer.utils import mesh,pmesh,load_wav,load_pcm, visual
 
 import matplotlib.pyplot as plt
 import sounddevice as sd
 import soundfile as sf
-from scipy.io import wavfile
 
-filepath = "test_audio/rec1/"
-x,sr = load_wav(filepath)
+
+
+
+filepath = "./test_audio/rec1/"
+print(os.chdir(sys.path[0]))
+x,sr = load_wav(os.path.abspath(filepath))
 sr = 16000
 r = 0.032
 c = 343
@@ -49,10 +54,10 @@ yout = fixedbeamformer.process(x,angle,method=2,retH=True,retWNG=True,retDI=True
 end = time.clock()
 print(end-start)
 
-# listen processed result
-sd.default.channels = 1
-sd.play(yout['data'],fs)
-sd.wait()
+# # listen processed result
+# sd.default.channels = 1
+# sd.play(yout['data'],fs)
+# sd.wait()
 
 # view beampattern
 mesh(yout['beampattern'])
@@ -61,4 +66,5 @@ mesh(yout['beampattern'])
 # save audio
 # wavfile.write('output/output_fixedbeamformer.wav',16000,yout['data'])
 
+visual(x[0,:],yout['data'])
 

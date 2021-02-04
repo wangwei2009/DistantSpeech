@@ -1,8 +1,41 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+import os
+
+import librosa
+import librosa.display
+
+def spec(x):
+    D = librosa.stft(x)  # STFT of y
+    S_db = librosa.amplitude_to_db(np.abs(D), ref=np.max)
+
+    return S_db
 
 
+def visual(x,y=None,sr=16000):
+
+    if y is not None:
+        S_db1 = spec(x)
+        S_db2 = spec(y)
+
+        plt.figure()
+        plt.subplot(2, 1, 1)
+        librosa.display.specshow(S_db1, y_axis='linear', x_axis='time',sr=sr)
+        plt.colorbar()
+
+        plt.subplot(2, 1, 2)
+        librosa.display.specshow(S_db2, y_axis='linear', x_axis='time',sr=sr)
+        plt.colorbar()
+
+        plt.show()
+    else:
+        S_db = spec(x)
+        plt.figure()
+        librosa.display.specshow(S_db, y_axis='linear', x_axis='time',sr=sr)
+        plt.colorbar()
+        plt.show()  
+        
 def mesh(array2D):
     """
     plot 2D array
@@ -15,7 +48,7 @@ def mesh(array2D):
     fig1 = plt.figure()
     ax = Axes3D(fig1)
     ax.plot_surface(X, Y, array2D)
-    plt.show()
+    # plt.show()
 
 def pmesh(array2D):
     """
@@ -55,7 +88,7 @@ def load_wav(filepath):
     filename = find_files(filepath,".wav")
     wavdata_list = []
     for names in filename:
-        x1, sr = librosa.load(filepath + names, sr=None)
+        x1, sr = librosa.load(os.path.join(filepath,names), sr=None)
         wavdata_list.append(x1)
     L = len(wavdata_list[0])
     M = len(filename)

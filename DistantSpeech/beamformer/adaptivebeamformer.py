@@ -1,8 +1,8 @@
 from scipy.signal import windows
 from scipy import signal
 import numpy as np
-from beamformer.MicArray import MicArray
-from beamformer.beamformer import beamformer
+from .MicArray import MicArray
+from .beamformer import beamformer
 class adaptivebeamfomer(beamformer):
 
     def __init__(self, MicArray,frameLen=256,hop=None,nfft=None,c=343,r=0.032,fs=16000):

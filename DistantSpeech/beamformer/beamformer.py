@@ -1,6 +1,6 @@
 
 import numpy as np
-from beamformer.MicArray import MicArray
+from .MicArray import MicArray
 import warnings
 
 

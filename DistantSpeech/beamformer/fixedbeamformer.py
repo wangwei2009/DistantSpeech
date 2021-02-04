@@ -1,8 +1,8 @@
 from scipy.signal import windows
 from scipy import signal
 import numpy as np
-from beamformer.MicArray import MicArray
-from beamformer.beamformer import beamformer
+from .MicArray import MicArray
+from .beamformer import beamformer
 import warnings
 
 class fixedbeamformer(beamformer):
