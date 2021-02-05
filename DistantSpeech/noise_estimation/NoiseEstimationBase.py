@@ -2,7 +2,7 @@
 import numpy as np
 
 class NoiseEstimationBase(object):
-    def __init__(self, nfft=320) -> None:
+    def __init__(self, nfft=256) -> None:
         super().__init__()
 
         self.nfft = nfft

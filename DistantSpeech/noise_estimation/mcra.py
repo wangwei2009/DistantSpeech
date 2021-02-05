@@ -6,8 +6,8 @@ import time
 from DistantSpeech.noise_estimation.NoiseEstimationBase import NoiseEstimationBase
 
 class NoiseEstimationMCRA(NoiseEstimationBase):
-    def __init__(self) -> None:
-        super(NoiseEstimationMCRA, self).__init__()
+    def __init__(self, nfft=256) -> None:
+        super(NoiseEstimationMCRA, self).__init__(nfft=nfft)
 
     def estimation(self, Y: np.ndarray):
 
@@ -80,7 +80,7 @@ def main(args):
     pmesh(librosa.power_to_db(Y))
     plt.savefig('pmesh.png')
 
-    mcra = NoiseEstimationMCRA()
+    mcra = NoiseEstimationMCRA(nfft=320)
     noise_psd = np.zeros(Y.shape)
     p = np.zeros(Y.shape)
     for n in range(Y.shape[1]):
