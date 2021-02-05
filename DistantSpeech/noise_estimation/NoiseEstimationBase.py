@@ -2,12 +2,12 @@
 import numpy as np
 
 class NoiseEstimationBase(object):
-    def __init__(self, nfft=256) -> None:
+    def __init__(self, nfft=320) -> None:
         super().__init__()
 
         self.nfft = nfft
-        self.half_bin = self.nfft/2+1
-        self.lamba_d = np.zeros(self.half_bin)
+        self.half_bin = int(self.nfft/2+1)
+        self.lambda_d = np.zeros(self.half_bin)
         self.alpha_d = 0.95
 
         self.alpha_s = 0.8;
@@ -15,6 +15,7 @@ class NoiseEstimationBase(object):
         self.alpha_p = 0.2;
 
         self.ell = 1;
+        self.b = [0.25,0.5,0.25]
 
         self.S = np.zeros(self.half_bin)
         self.Smin = np.zeros(self.half_bin)
@@ -23,6 +24,8 @@ class NoiseEstimationBase(object):
         self.alpha_tilde = np.zeros(self.half_bin)
 
         self.L = 125
+
+        self.frm_cnt = 0;
 
     def estimation(self, X):
         pass
