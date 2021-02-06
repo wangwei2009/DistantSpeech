@@ -1,13 +1,17 @@
-import pyaudio
-import time
 import threading
 import wave
-import numpy as np
 
-import time
 import pyaudio
 import numpy as np
-from beamformer.fixedbeamformer import fixedbeamformer
+from DistantSpeech.beamformer.fixedbeamformer import fixedbeamformer
+import threading
+import wave
+
+import numpy as np
+import pyaudio
+
+from DistantSpeech.beamformer.fixedbeamformer import fixedbeamformer
+
 
 class realtime_processing(object):
     def __init__(self, EnhancementMehtod=fixedbeamformer, angle=0,chunk=1024, channels=6, rate=16000,Recording=False):

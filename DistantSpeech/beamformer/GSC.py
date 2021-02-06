@@ -158,22 +158,22 @@ class GSC(beamformer):
                 self.frameCount = 0
                 self.calc = 1
 
-            # self.mcra.estimation(np.abs(Z[0,:]*np.conj(Z[0,:])))
+            self.mcra.estimation(np.abs(Z[0,:]*np.conj(Z[0,:])))
 
-            if t < 300:
-                is_speech = 0
-            else:
-                is_speech = 1
+            # if t < 300:
+            #     is_speech = 0
+            # else:
+            #     is_speech = 1
 
             for k in range(0, self.half_bin):
                 a = np.mat(np.exp(-1j * self.omega[k] * tao)).T  # propagation vector
                 # recursive average Ryy
                 self.Ryy[k, :, :] = alpha_y * self.Ryy[k, :, :] + (1 - alpha_y) * np.dot(Z[:, k, np.newaxis],
                                                                                  Z[:, k, np.newaxis].conj().transpose())
-                # if self.mcra.p[k]>0.5:
-                #     is_speech = 1
-                # else:
-                #     is_speech = 0
+                if self.mcra.p[k] > 0.5:
+                    is_speech = 1
+                else:
+                    is_speech = 0
 
                 if is_speech==0:
                     # recursive average Rvv
@@ -197,18 +197,15 @@ class GSC(beamformer):
                     # residual output
                     Y[k] = self.Yfbf[k] - self.G[:,k].conj().T@self.U[:,k]
 
-                    # noise segment,update parameter
-                    # if self.calc:
-                    if is_speech==0:
-                        # print("updating\n")
-                        self.Pest[k] = 1 #rho * self.Pest[k] + (1 - rho) * np.sum(np.power(np.abs(Z[:,k]),2))
-                        # update MNC weights
-                        self.G[:,k] = self.G[:,k]+mu * self.U[:,k]*Y[k].conj() / self.Pest[k]
+                    # use speech presence probability to control AIC update
+                    self.Pest[k] = 1  # rho * self.Pest[k] + (1 - rho) * np.sum(np.power(np.abs(Z[:,k]),2))
+                    # update MNC weights
+                    self.G[:, k] = self.G[:, k] + mu * (1 - self.mcra.p[k]) * self.U[:, k] * Y[k].conj() / self.Pest[k]
 
-                        if retWNG:
-                            WNG[k] = self.calcWNG(a, self.H[:, k, np.newaxis])
-                        if retDI:
-                            DI[k] = self.calcDI(a, self.H[:, k, np.newaxis], self.Fvv[k, :, :])
+                    if retWNG:
+                        WNG[k] = self.calcWNG(a, self.H[:, k, np.newaxis])
+                    if retDI:
+                        DI[k] = self.calcDI(a, self.H[:, k, np.newaxis], self.Fvv[k, :, :])
 
             Cf = np.fft.irfft(Y)#*window.sum()
             yout[t * self.hop:t * self.hop + self.frameLen] += Cf*window
