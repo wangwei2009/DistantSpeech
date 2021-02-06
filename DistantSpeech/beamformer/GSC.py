@@ -1,10 +1,10 @@
-from scipy.signal import windows
-from scipy import signal
 import numpy as np
-from .MicArray import MicArray
-from .beamformer import beamformer
+from scipy.signal import windows
+
 # from vad.vad import vad
 from DistantSpeech.noise_estimation.mcra import NoiseEstimationMCRA
+from .beamformer import beamformer
+
 
 class GSC(beamformer):
 
@@ -62,7 +62,7 @@ class GSC(beamformer):
         self.W = np.zeros((self.M, self.half_bin),dtype=complex)
         # MNC weights for lower path
         self.G = np.zeros((self.M - 1, self.half_bin),dtype=complex)
-        self.Pest = np.ones((self.half_bin),dtype=complex)
+        self.Pest = np.ones(self.half_bin)
 
         self.Yfbf = np.zeros((self.half_bin),dtype=complex)
 
@@ -140,7 +140,7 @@ class GSC(beamformer):
             for k in range(0, self.half_bin):
                 a_k = np.mat(np.exp(-1j * self.omega[k] * tao)).T
                 self.W[:,k, np.newaxis] = a_k / (a_k.conj().T @ a_k)
-                for i in range(0,M-2):
+                for i in range(0, M-1):
                     self.BM[0, i, k] = a_k[0]
                     self.BM[i + 1, i, k] = -1 * a_k[i + 1]
         Y = np.ones([self.half_bin], dtype=complex)
@@ -160,7 +160,7 @@ class GSC(beamformer):
 
             # self.mcra.estimation(np.abs(Z[0,:]*np.conj(Z[0,:])))
 
-            if t < 200:
+            if t < 300:
                 is_speech = 0
             else:
                 is_speech = 1
