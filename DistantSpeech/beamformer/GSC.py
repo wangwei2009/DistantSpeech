@@ -3,7 +3,8 @@ from scipy import signal
 import numpy as np
 from .MicArray import MicArray
 from .beamformer import beamformer
-from vad.vad import vad
+# from vad.vad import vad
+from DistantSpeech.noise_estimation.mcra import NoiseEstimationMCRA
 
 class GSC(beamformer):
 
@@ -64,6 +65,8 @@ class GSC(beamformer):
         self.Pest = np.ones((self.half_bin),dtype=complex)
 
         self.Yfbf = np.zeros((self.half_bin),dtype=complex)
+
+        self.mcra = NoiseEstimationMCRA(nfft=self.nfft)
 
 
 
@@ -155,7 +158,9 @@ class GSC(beamformer):
                 self.frameCount = 0
                 self.calc = 1
 
-            if t < 1000:
+            # self.mcra.estimation(np.abs(Z[0,:]*np.conj(Z[0,:])))
+
+            if t < 200:
                 is_speech = 0
             else:
                 is_speech = 1
@@ -165,6 +170,11 @@ class GSC(beamformer):
                 # recursive average Ryy
                 self.Ryy[k, :, :] = alpha_y * self.Ryy[k, :, :] + (1 - alpha_y) * np.dot(Z[:, k, np.newaxis],
                                                                                  Z[:, k, np.newaxis].conj().transpose())
+                # if self.mcra.p[k]>0.5:
+                #     is_speech = 1
+                # else:
+                #     is_speech = 0
+
                 if is_speech==0:
                     # recursive average Rvv
                     self.Rvv[k, :, :] = alpha_v * self.Rvv[k, :, :] + (1 - alpha_v) * np.dot(Z[:, k,np.newaxis],Z[:, k,np.newaxis].conj().transpose())
