@@ -26,7 +26,7 @@ MarkupSafe==1.1.1
 matplotlib==3.0.3
 more-itertools==7.0.0
 numba==0.43.1
-numpy==1.16.2+mkl
+numpy==1.16.2
 packaging==19.0
 pluggy==0.12.0
 pooch==1.3.0
