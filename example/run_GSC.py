@@ -36,7 +36,7 @@ def main(args):
     r = 0.032
     fs = sr
 
-    start = time.clock()
+    start = time.process_time()
 
     MicArrayObj = MicArray(arrayType='circular', r=0.032, M=4)
     angle = np.array([197, 0]) / 180 * np.pi
@@ -44,7 +44,7 @@ def main(args):
     GSC_1 = GSC(MicArrayObj,frameLen,hop,nfft,c,r,fs)
     yout = GSC_1.process(x,angle,method=3)
 
-    end = time.clock()
+    end = time.process_time()
     print(end-start)
 
     # listen processed result
