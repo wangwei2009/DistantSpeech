@@ -4,6 +4,8 @@ import os
 import time
 from DistantSpeech.noise_estimation.NoiseEstimationBase import NoiseEstimationBase
 from DistantSpeech.noise_estimation.mcra import NoiseEstimationMCRA
+from scipy.signal import windows
+from mpmath import expint
 
 
 class NsOmlsaMulti(NoiseEstimationBase):
@@ -11,10 +13,11 @@ class NsOmlsaMulti(NoiseEstimationBase):
         super(NsOmlsaMulti, self).__init__(nfft=nfft)
 
         self.G_H1 = np.ones(self.half_bin)
+        self.G = np.ones(self.half_bin)
 
         self.gamma = np.ones(self.half_bin)
         self.zeta_Y = np.ones(self.half_bin)              # smoothed fixed bf
-        self.zeta_U = np.zeros((M, self.half_bin))        # smoothed ref
+        self.zeta_U = np.zeros((M-1, self.half_bin))        # smoothed ref
         self.MU_Y = np.ones(self.half_bin)                # estimated noise from fixed bf channel
         self.MU_U = np.zeros((M-1, self.half_bin))        # estimated noise from ref channel
         self.lambda_hat_d = np.ones(self.half_bin)
@@ -23,6 +26,13 @@ class NsOmlsaMulti(NoiseEstimationBase):
         self.LAMBDA_Y = np.ones(self.half_bin)            # posteriori SNR
         self.LAMBDA_U = np.ones(self.half_bin)            #
 
+        self.Omega = np.ones(self.half_bin)
+        self.gamma_s = np.ones(self.half_bin)
+
+        self.q_hat = np.ones(self.half_bin)
+
+        self.xi_hat = np.ones(self.half_bin)
+
         self.first_frame = 1
         self.M = M
         self.noise_est_ref = []
@@ -30,7 +40,6 @@ class NsOmlsaMulti(NoiseEstimationBase):
         self.noise_est_fixed  = NoiseEstimationMCRA(nfft=self.nfft)   # initialize noise estimator
         for ch in range(M-1):
             self.noise_est_ref.append(NoiseEstimationMCRA(nfft=self.nfft))
-
 
     def estimation(self, y: np.ndarray, u: np.ndarray):
 
@@ -43,252 +52,62 @@ class NsOmlsaMulti(NoiseEstimationBase):
             for ch in range(self.M-1):
                 self.MU_U[ch] = self.noise_est_ref[ch].estimation(u[ch,:])
 
-            self.zeta_Y = self.smooth_psd(y, self.zeta_Y,)zeta_Y(:,L-1), Y_l, b, alpha_s); % Eq 21
-            for ch = 2:M
-                zeta_U(:,ch,L) = smoothPSD(zeta_U(:,ch,L-1), U_l(:,ch-1), b, alpha_s);
-            end
+            win = windows.hanning(3)
+            alpha = 0.92
 
+            self.zeta_Y = self.smooth_psd(y, self.zeta_Y, win,alpha) # Eq 21
+            for ch in range(self.M - 1):
+                self.zeta_U = self.smoothPSD(u[ch,:], self.zeta_U, win, alpha)
 
+            self.LAMBDA_Y = self.zeta_Y/self.MU_Y
+            self.LAMBDA_U = np.max(self.zeta_U/self.MU_U,axis=0)
 
+            # Eq.6 The transient beam - to - reference ratio(TBRR)
+            eps = 0.01
+            self.Omega = np.max((self.zeta_Y - self.MU_Y), 0)/ \
+                         np.max(np.max(self.zeta_U - self.MU_U, axis=0), eps * self.MU_Y)
+            self.Omega = np.maximum(self.Omega, 0.1)
+            self.Omega = np.minimum(self.Omega,100)
 
-        for L = 1:size(U, 1) - 1
+            Bmin = 1.66
+            # Eq.27 posteriori SNR at the beamformer output
+            self.gamma_s = np.minimum(y / self.MU_Y * Bmin, 100)
 
-        Y_l = Y(:, L);
-        U_l = squeeze(U(L,:,:)).';
-
-% U_l = squeeze(U(L,:,:));
-
-% ----------------- estimate / update
-noise
-psd - -------------
-
-% sig_Y = abs([Y_l;
-conj(flipud(Y_l(2: end - 1)))]);
-% sig_U = abs([U_l;
-conj(flipud(U_l(2: end - 1,:)))]);
-sig_Y = abs(Y_l);
-sig_U = abs(U_l);
-nsY_ps = sig_Y. ^ 2;
-nsU_ps = sig_U. ^ 2;
-
-if L == 1
-    % Initialize
-    variables
-    at
-    the
-    first
-    frame
-    for all frequency bins k
-    G_H1(:, 1) = 1;
-    gamma(:, 1) = 1;
-    zeta_Y(:, 1) = sig_Y. ^ 2;
-    MU_Y(:, 1) = sig_Y. ^ 2;
-    lambda_hat_d(:, 1) = sig_Y. ^ 2;
-
-    parametersY = initialise_parameters([nsY_ps;
-    flipud(nsY_ps(2: end - 1))], Srate, method);
-
-    for ch = 2:M
-    zeta_U(:, ch, L) = sig_U(:, ch - 1).^ 2;
-    parametersU
-    {ch} = initialise_parameters([nsU_ps(:, ch - 1);flipud(nsU_ps(2: end - 1, ch - 1))], Srate, method);
-    end
-
-else
-    parametersY = noise_estimation([nsY_ps;
-    flipud(nsY_ps(2: end - 1))], method, parametersY);
-    MU_Y(:, L) = parametersY.noise_ps(1: half_bin);
-    % MU_Y(:, L) = lambda_d_Y(:, L);
-
-    for ch = 2:M
-    parametersU
-    {ch} = noise_estimation([nsU_ps(:, ch - 1);flipud(nsU_ps(2: end - 1, ch - 1))], method, parametersU
-    {ch});
-    MU_U(:, ch, L) = parametersU
-    {ch}.noise_ps(1: half_bin);
-    % MU_U(:, ch, L) = lambda_d_u(:, ch, L);
-    end
-
-    zeta_Y(:, L) = smoothPSD(zeta_Y(:, L - 1), Y_l, b, alpha_s); % Eq
-    21
-    for ch = 2:M
-    zeta_U(:, ch, L) = smoothPSD(zeta_U(:, ch, L - 1), U_l(:, ch - 1), b, alpha_s);
-    end
-
-    % ---------------------------------------------------------
-
-    LAMBDA_Y(:, L) = zeta_Y(:, L)./ MU_Y(:, L); % Eq
-    22
-    LAMBDA_U(:, L) = max(zeta_U(:, 2: end, L)./ MU_U(:, 2: M, L), [], 2); % Eq
-    23
-
-    % Eq
-    6
-    The
-    transient
-    beam - to - reference
-    ratio(TBRR)
-    eps = 0.01;
-    Omega(:, L) = max((zeta_Y(:, L) - MU_Y(:, L)), 0)./ ...
-    max(max(zeta_U(:, 2: end, L) - MU_U(:, 2: M, L), [], 2), eps * MU_Y(:, L));
-    Omega(:, L) = max(Omega(:, L), 0.1);
-    Omega(:, L) = min(Omega(:, L), 100);
-
-    % Eq
-    27
-    posteriori
-    SNR
-    at
-    the
-    beamformer
-    output
-    gamma_s(:, L) = min(abs(Y_l). ^ 2. / (MU_Y(:, L) * Bmin), 100);
-
-    [H0s, H0t, H1] = hypothesis(LAMBDA_Y(:, L), LAMBDA_U(:, L), Omega(:, L), gamma_s(:, L));
-
-
-    for k = 1:half_bin
-
-    % Eq
-    29, The
-    a
-    priori
-    signal
-    absence
-    probability
-    pr.gamma_high = 0.1 * 10 ^ 2;
-    pr.Omega_low = 0.3;
-    pr.Omega_high = 3;
-    if (gamma_s(k, L) < pr.gamma_low | | Omega(k, L) < pr.Omega_low)
-        q_hat(k, L) = 1;
-    else
-        q_hat(k, L) = max(...
-        max(...
-            (pr.gamma_high - gamma_s(k, L)) / (pr.gamma_high - pr.gamma_low), ...
-            ((pr.Omega_high - Omega(k, L)) / (pr.Omega_high - pr.Omega_low))...
-            ), 0);
-        end
-        q_hat(k, L) = q_hat(k, L);
-    % q_hat(k, L) = qhat_Y(k, L);
-
-    % posteriori
-    SNR
-    gamma(k, L) = abs(Y(k, L)) ^ 2 / max(lambda_hat_d(k, L), 1e-10);
-
-    % Eq
-    30, priori
-    SNR
-    xi_hat(k, L) = alpha * G_H1(k, L - 1). ^ 2 * gamma(k, L - 1) + (1 - alpha) * max(gamma(k, L) - 1, 0);
-    % xi_hat(k, L) = max(xi_hat(k, L), xi_min);
-
-    %
-    nu(k, L) = gamma(k, L) * xi_hat(k, L) / (1 + xi_hat(k, L));
-
-    % Eq
-    31, the
-    spectral
-    gain
-    function
-    of
-    the
-    LSA
-    estimator
-    when
-    the
-    % signal is surely
-    present
-    G_H1(k, L) = xi_hat(k, L) / (1 + xi_hat(k, L)) * exp(0.5 * expint(nu(k)));
-
-    % Eq
-    28, the
-    signal
-    presence
-    probability
-    p(k, L) = 1 / (1 + q_hat(k, L) / (1 - q_hat(k, L)) * (1 + xi_hat(k, L)) * exp(-1 * nu(k, L)));
-    % p(k, L) = phat_Y(k, L);
-
-    % Eq
-    33, time - varying
-    frequencydependent
-    smoothing
-    factor
-    alpha_widetilde_d(k, L) = alpha_d + (1 - alpha_d) * p(k, L);
-
-    % Eq
-    32, An
-    estimate
-    for noise PSD is
-        % obtained
-        by
-        recursively
-        averaging
-        past
-        spectral
-        power
-        values
-    % of
-    the
-    noisy
-    measurement
-    lambda_hat_d(k, L + 1) = alpha_widetilde_d(k, L) * lambda_hat_d(k, L) + ...
-    beta * (1 - alpha_widetilde_d(k, L)) * abs(Y_l(k)) ^ 2;
-    % lambda_hat_d(k, L) = lambda_d_Y(k, L);
-
-    % Eq
-    35, OM
-    LSA
-    gain
-    function
-    G(k, L) = real(G_H1(k, L) ^ p(k, L) * Gmin ^ (1 - p(k, L)));
-    G(k, L) = min(G(k, L), 1);
-
-    end
-    % wiener
-    filter
-    % alpha_ns = 2;
-    % beta_specsub = 1;
-    % mu = 1;
-    % Gmin_specsub = 0.15;
-    % G(:, L) = spectral_subtraction(p(:, L), alpha_ns, beta_specsub, mu, Gmin_specsub);
-
-    end
-    end
-
-
-        for k in range(self.half_bin - 1):
-            if self.frm_cnt == 0:
-                self.Smin[k] = Y[k]
-                self.Stmp[k] = Y[k]
-                self.lambda_d[k] = Y[k]
-                self.p[k] = 1.0
-            else:
-                Sf = Y[k - 1] * self.b[0] + Y[k] * self.b[1] + Y[k + 1] * self.b[2]  # eq 6,frequency smoothing
-                self.S[k] = self.alpha_s * self.S[k] + (1 - self.alpha_s) * Sf  # eq 7,time smoothing
-
-                self.Smin[k] = np.minimum(self.Smin[k], self.S[k])  # eq 8/9 minimal-tracking
-                self.Stmp[k] = np.minimum(self.Stmp[k], self.S[k])
-
-                if self.ell % self.L == 0:
-                    self.Smin[k] = np.minimum(self.Stmp[k], self.S[k])  # eq 10/11
-                    self.Stmp[k] = self.S[k]
-
-                    self.ell = 0  # loop count
-
-                Sr = self.S[k] / (self.Smin[k] + 1e-6);
-
-                if Sr > self.delta_s:
-                    I = 1
+            gamma_high = 0.1 * np.power(10, 2)
+            gamma_low = 1
+            Omega_low = 0.3
+            Omega_high = 3
+            # Eq.29, The a priori signal absence probability
+            for k in range(self.half_bin):
+                if self.gamma_s[k] < gamma_low or self.Omega[k] < Omega_low:
+                    self.q_hat[k] = 1
                 else:
-                    I = 0
+                    self.q_hat[k] = np.maximum((gamma_high - self.gamma_s[k])/(gamma_high-gamma_low),
+                                               (Omega_high - self.Omega[k])/(Omega_high - Omega_low))
+                    self.q_hat[k] = min(max(self.q_hat[k],0),1)
 
-                self.p[k] = self.alpha_p * self.p[k] + (
-                            1 - self.alpha_p) * I;  # eq 14,updata speech presence probability
-                self.p[k] = max(min(self.p[k], 1.0), 0.0)
+            # posteriori SNR
+            self.gamma = y / np.maximum(self.lambda_d,1e-10)
 
-        self.frm_cnt = self.frm_cnt + 1
-        self.lambda_d[self.half_bin - 1] = 1e-8
-        self.ell = self.ell + 1
-        self.update_noise_psd(Y)
+            # Eq 30, priori SNR
+            self.xi_hat = alpha * np.pow(self.G_H1, 2) * self.gamma + (1 - alpha) * np.maximum(self.gamma - 1, 0)
+
+            #
+            nu = self.gamma * self.xi_hat / (1 + self.xi_hat)
+
+            # Eq 31, the spectral gain function of the LSA estimator when the % signal is surely present
+            self.G_H1 = self.xi_hat / (1 + self.xi_hat) * np.exp(0.5 * expint(nu))
+
+            # Eq 28, the signal presence probability
+            self.p = 1 / (1 + self.q_hat / (1 - self.q_hat) * (1 + self.xi_hat) * np.exp(-1 * nu))
+
+            self.update_noise_psd(y)
+
+            # # Eq.35, OMLSA gain function
+            # self.G = np.real(np.pow(self.G_H1,self.p) * Gmin ^ (1 - self.p))
+            # G(k, L) = min(G(k, L), 1);
+
+            return self.lambda_d
 
 
 def main(args):
