@@ -1,7 +1,8 @@
-import numpy as np
 import argparse
 import os
-import time
+
+import numpy as np
+
 from DistantSpeech.noise_estimation.NoiseEstimationBase import NoiseEstimationBase
 
 
@@ -53,12 +54,12 @@ class NoiseEstimationMCRA(NoiseEstimationBase):
 
 def main(args):
     from DistantSpeech.transform.transform import Transform
-    from DistantSpeech.beamformer.utils import mesh, pmesh, load_wav, load_pcm, visual
+    from DistantSpeech.beamformer.utils import pmesh, load_wav
     from matplotlib import pyplot as plt
     import librosa
 
-    filepath = "example/test_audio/rec1/"
-    x, sr = load_wav(os.path.abspath(filepath))
+    filepath = "../../example/test_audio/rec1/"
+    x, sr = load_wav(os.path.abspath(filepath))      # [channel,samples]
     sr = 16000
     r = 0.032
     c = 343
