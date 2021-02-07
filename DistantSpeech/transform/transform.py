@@ -416,6 +416,7 @@ class Transform(object):
         if len(x.shape) == 1:  # single channel
             x = x[:, np.newaxis]
         x = np.vstack((self.previous_input, x))
+        x = np.asfortranarray(x)
         # Compute the number of frames that will fit. The end may get truncated.
         n_frames = 1 + int((x.shape[0] - self.frame_length) / self.hop_length)
         Y = np.zeros((self.half_bin, n_frames, self.channel), dtype=np.complex)
