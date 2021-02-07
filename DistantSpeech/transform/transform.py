@@ -1,11 +1,9 @@
 import librosa
+import matplotlib.pyplot as plt
 import numpy as np
 import sounddevice as sd
-import matplotlib.pyplot as plt
-from librosa.core.fft import get_fftlib
-from librosa.filters import get_window
 from librosa import util
-from librosa.filters import window_sumsquare
+from librosa.filters import get_window
 from numba import jit
 
 
@@ -207,8 +205,6 @@ def stft(y, n_fft=2048, hop_length=None, win_length=None, window='hann',
                            dtype=dtype,
                            order='F')
 
-    fft = get_fftlib()
-
     # how many columns can we fit within MAX_MEM_BLOCK?
     n_columns = int(util.MAX_MEM_BLOCK / (stft_matrix.shape[0] *
                                           stft_matrix.itemsize))
@@ -216,7 +212,7 @@ def stft(y, n_fft=2048, hop_length=None, win_length=None, window='hann',
     for bl_s in range(0, stft_matrix.shape[1], n_columns):
         bl_t = min(bl_s + n_columns, stft_matrix.shape[1])
 
-        stft_matrix[:, bl_s:bl_t] = fft.rfft(fft_window *
+        stft_matrix[:, bl_s:bl_t] = np.fft.rfft(fft_window *
                                              y_frames[:, bl_s:bl_t],
                                              axis=0)
     return stft_matrix
@@ -356,14 +352,12 @@ def istft(stft_matrix, hop_length=None, win_length=None, window='hann',
     n_columns = int(util.MAX_MEM_BLOCK // (stft_matrix.shape[0] *
                                            stft_matrix.itemsize))
 
-    fft = get_fftlib()
-
     frame = 0
     for bl_s in range(0, n_frames, n_columns):
         bl_t = min(bl_s + n_columns, n_frames)
 
         # invert the block and apply the window function
-        ytmp = ifft_window * fft.irfft(stft_matrix[:, bl_s:bl_t], axis=0)
+        ytmp = ifft_window * np.fft.irfft(stft_matrix[:, bl_s:bl_t], axis=0)
 
         # Overlap-add the istft block starting at the i'th frame
         __overlap_add(y[frame * hop_length:], ytmp, hop_length)
@@ -403,28 +397,38 @@ def istft(stft_matrix, hop_length=None, win_length=None, window='hann',
 
 
 class Transform(object):
-    def __init__(self, n_fft=256, hop_length=128, window=None):
+    def __init__(self, channel=1, n_fft=256, hop_length=128, window=None):
+        self.channel = channel
         self.n_fft = n_fft
+        self.frame_length = self.n_fft
         self.hop_length = hop_length
-        self.previous_input = np.zeros(self.hop_length)
-        self.previous_output = np.zeros(self.hop_length)
+        self.previous_input = np.zeros((self.hop_length, self.channel))
+        self.previous_output = np.zeros((self.hop_length, self.channel))
         self.first_frame = 1
         if window is not None:
             self.window = window
         else:
             self.window = get_window('hann', n_fft, fftbins=True)
             self.window = np.sqrt(self.window)
+        self.half_bin = int(self.n_fft / 2 + 1)
 
     def stft(self, x):
-        x = np.hstack((self.previous_input, x))
-        Y = stft(x, n_fft=self.n_fft, hop_length=self.hop_length, center=False, window=self.window)
-        self.previous_input = x[-self.hop_length:]
+        if len(x.shape) == 1:  # single channel
+            x = x[:, np.newaxis]
+        x = np.vstack((self.previous_input, x))
+        # Compute the number of frames that will fit. The end may get truncated.
+        n_frames = 1 + int((x.shape[0] - self.frame_length) / self.hop_length)
+        Y = np.zeros((self.half_bin, n_frames, self.channel), dtype=np.complex)
+        for ch in range(self.channel):
+            Y[:, :, ch] = stft(x[:, ch], n_fft=self.n_fft, hop_length=self.hop_length,
+                               center=False, window=self.window)  # [1 + n_fft/2, n_frames]
+            self.previous_input[:, ch] = x[-self.hop_length:, ch]
         return Y
 
     def istft(self, Y):
         x = istft(Y, hop_length=self.hop_length, win_length=self.n_fft, center=False, window=self.window)
-        x[:self.hop_length] += self.previous_output
-        self.previous_output = x[-self.hop_length:]
+        x[:self.hop_length] += self.previous_output[:, 0]
+        self.previous_output[:, 0] = x[-self.hop_length:]
         return x[:-self.hop_length]
 
     def magphase(self, D, power=1):
@@ -437,8 +441,7 @@ class Transform(object):
 
 if __name__ == '__main__':
     filename = 'speech1.wav'
-    sr = librosa.get_samplerate(filename)
-    data, _ = librosa.load(filename, sr=sr)
+    data, sr = librosa.load(filename, sr=None)
 
     data_recon = np.zeros(len(data))
     t = 0
@@ -451,6 +454,7 @@ if __name__ == '__main__':
     for y_block in stream:
         if len(y_block) >= 1024:
             D = transform.stft(y_block)
+            D = D[:, :, 0]
             d = transform.istft(D)
             data_recon[t * frame_length:(t + 1) * frame_length] = d
         t = t + 1
