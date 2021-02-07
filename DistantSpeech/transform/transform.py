@@ -423,7 +423,8 @@ class Transform(object):
             Y[:, :, ch] = stft(x[:, ch], n_fft=self.n_fft, hop_length=self.hop_length,
                                center=False, window=self.window)  # [1 + n_fft/2, n_frames]
             self.previous_input[:, ch] = x[-self.hop_length:, ch]
-        return Y
+
+        return np.squeeze(Y)
 
     def istft(self, Y):
         x = istft(Y, hop_length=self.hop_length, win_length=self.n_fft, center=False, window=self.window)
