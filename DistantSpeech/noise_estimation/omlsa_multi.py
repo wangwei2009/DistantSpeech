@@ -1,11 +1,12 @@
-import numpy as np
 import argparse
 import os
-import time
+
+import numpy as np
+from mpmath import expint
+from scipy.signal import windows
+
 from DistantSpeech.noise_estimation.NoiseEstimationBase import NoiseEstimationBase
 from DistantSpeech.noise_estimation.mcra import NoiseEstimationMCRA
-from scipy.signal import windows
-from mpmath import expint
 
 
 class NsOmlsaMulti(NoiseEstimationBase):
@@ -16,15 +17,15 @@ class NsOmlsaMulti(NoiseEstimationBase):
         self.G = np.ones(self.half_bin)
 
         self.gamma = np.ones(self.half_bin)
-        self.zeta_Y = np.ones(self.half_bin)              # smoothed fixed bf
-        self.zeta_U = np.zeros((M-1, self.half_bin))        # smoothed ref
-        self.MU_Y = np.ones(self.half_bin)                # estimated noise from fixed bf channel
-        self.MU_U = np.zeros((M-1, self.half_bin))        # estimated noise from ref channel
+        self.zeta_Y = np.ones(self.half_bin)  # smoothed fixed bf
+        self.zeta_U = np.zeros((M - 1, self.half_bin))  # smoothed ref
+        self.MU_Y = np.ones(self.half_bin)  # estimated noise from fixed bf channel
+        self.MU_U = np.zeros((M - 1, self.half_bin))  # estimated noise from ref channel
         self.lambda_hat_d = np.ones(self.half_bin)
 
-        self.gamma = np.ones(self.half_bin)               # posteriori SNR for fixed bf output
-        self.LAMBDA_Y = np.ones(self.half_bin)            # posteriori SNR
-        self.LAMBDA_U = np.ones(self.half_bin)            #
+        self.gamma = np.ones(self.half_bin)  # posteriori SNR for fixed bf output
+        self.LAMBDA_Y = np.ones(self.half_bin)  # posteriori SNR
+        self.LAMBDA_U = np.ones(self.half_bin)  #
 
         self.Omega = np.ones(self.half_bin)
         self.gamma_s = np.ones(self.half_bin)
@@ -37,8 +38,8 @@ class NsOmlsaMulti(NoiseEstimationBase):
         self.M = M
         self.noise_est_ref = []
 
-        self.noise_est_fixed  = NoiseEstimationMCRA(nfft=self.nfft)   # initialize noise estimator
-        for ch in range(M-1):
+        self.noise_est_fixed = NoiseEstimationMCRA(nfft=self.nfft)  # initialize noise estimator
+        for ch in range(M - 1):
             self.noise_est_ref.append(NoiseEstimationMCRA(nfft=self.nfft))
 
     def estimation(self, y: np.ndarray, u: np.ndarray):
@@ -49,25 +50,25 @@ class NsOmlsaMulti(NoiseEstimationBase):
             self.first_frame = 0
         else:
             self.MU_Y = self.noise_est_fixed.estimation(y)
-            for ch in range(self.M-1):
-                self.MU_U[ch] = self.noise_est_ref[ch].estimation(u[ch,:])
+            for ch in range(self.M - 1):
+                self.MU_U[ch] = self.noise_est_ref[ch].estimation(u[ch, :])
 
             win = windows.hanning(3)
             alpha = 0.92
 
-            self.zeta_Y = self.smooth_psd(y, self.zeta_Y, win,alpha) # Eq 21
+            self.zeta_Y = self.smooth_psd(y, self.zeta_Y, win, alpha)  # Eq 21
             for ch in range(self.M - 1):
-                self.zeta_U = self.smoothPSD(u[ch,:], self.zeta_U, win, alpha)
+                self.zeta_U = self.smooth_psd(u[ch, :], self.zeta_U, win, alpha)
 
-            self.LAMBDA_Y = self.zeta_Y/self.MU_Y
-            self.LAMBDA_U = np.max(self.zeta_U/self.MU_U,axis=0)
+            self.LAMBDA_Y = self.zeta_Y / self.MU_Y
+            self.LAMBDA_U = np.max(self.zeta_U / self.MU_U, axis=0)
 
             # Eq.6 The transient beam - to - reference ratio(TBRR)
             eps = 0.01
-            self.Omega = np.max((self.zeta_Y - self.MU_Y), 0)/ \
+            self.Omega = np.max((self.zeta_Y - self.MU_Y), 0) / \
                          np.max(np.max(self.zeta_U - self.MU_U, axis=0), eps * self.MU_Y)
             self.Omega = np.maximum(self.Omega, 0.1)
-            self.Omega = np.minimum(self.Omega,100)
+            self.Omega = np.minimum(self.Omega, 100)
 
             Bmin = 1.66
             # Eq.27 posteriori SNR at the beamformer output
@@ -82,15 +83,15 @@ class NsOmlsaMulti(NoiseEstimationBase):
                 if self.gamma_s[k] < gamma_low or self.Omega[k] < Omega_low:
                     self.q_hat[k] = 1
                 else:
-                    self.q_hat[k] = np.maximum((gamma_high - self.gamma_s[k])/(gamma_high-gamma_low),
-                                               (Omega_high - self.Omega[k])/(Omega_high - Omega_low))
-                    self.q_hat[k] = min(max(self.q_hat[k],0),1)
+                    self.q_hat[k] = np.maximum((gamma_high - self.gamma_s[k]) / (gamma_high - gamma_low),
+                                               (Omega_high - self.Omega[k]) / (Omega_high - Omega_low))
+                    self.q_hat[k] = min(max(self.q_hat[k], 0), 1)
 
             # posteriori SNR
-            self.gamma = y / np.maximum(self.lambda_d,1e-10)
+            self.gamma = y / np.maximum(self.lambda_d, 1e-10)
 
             # Eq 30, priori SNR
-            self.xi_hat = alpha * np.pow(self.G_H1, 2) * self.gamma + (1 - alpha) * np.maximum(self.gamma - 1, 0)
+            self.xi_hat = alpha * np.power(self.G_H1, 2) * self.gamma + (1 - alpha) * np.maximum(self.gamma - 1, 0)
 
             #
             nu = self.gamma * self.xi_hat / (1 + self.xi_hat)
@@ -112,12 +113,12 @@ class NsOmlsaMulti(NoiseEstimationBase):
 
 def main(args):
     from DistantSpeech.transform.transform import Transform
-    from DistantSpeech.beamformer.utils import mesh, pmesh, load_wav, load_pcm, visual
+    from DistantSpeech.beamformer.utils import pmesh, load_wav
     from matplotlib import pyplot as plt
     import librosa
 
-    filepath = "example/test_audio/rec1/"
-    x, sr = load_wav(os.path.abspath(filepath))
+    filepath = "./test_audio/rec1/"
+    x, sr = load_wav(os.path.abspath(filepath))  # [channel, samples]
     sr = 16000
     r = 0.032
     c = 343
@@ -131,22 +132,23 @@ def main(args):
     fs = sr
 
     print(x.shape)
+    channel = x.shape[0]
 
-    transform = Transform(n_fft=320, hop_length=160)
+    transform = Transform(n_fft=320, hop_length=160, channel=channel)
 
-    D = transform.stft(x[0, :])
+    D = transform.stft(x.transpose())     # [F,T,Ch]
     Y, _ = transform.magphase(D, 2)
     print(Y.shape)
-    pmesh(librosa.power_to_db(Y))
+    pmesh(librosa.power_to_db(Y[:, :, -1]))
     plt.savefig('pmesh.png')
 
-    mcra = NsOmlsaMulti(nfft=320)
+    omlsa_multi = NsOmlsaMulti(nfft=320)
     noise_psd = np.zeros(Y.shape)
     p = np.zeros(Y.shape)
     for n in range(Y.shape[1]):
-        mcra.estimation(Y[:, n])
-        noise_psd[:, n] = mcra.lambda_d
-        p[:, n] = mcra.p
+        omlsa_multi.estimation(Y[:, n, :])
+        noise_psd[:, n] = omlsa_multi.lambda_d
+        p[:, n] = omlsa_multi.p
 
     pmesh(librosa.power_to_db(noise_psd))
     plt.savefig('noise_psd.png')
