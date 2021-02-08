@@ -35,14 +35,31 @@ def main(args):
     r = 0.032
     fs = sr
 
-    start = time.process_time()
-
     MicArrayObj = MicArray(arrayType='circular', r=0.032, M=4)
     angle = np.array([197, 0]) / 180 * np.pi
 
     GSC_1 = GSC(MicArrayObj, frameLen, hop, nfft, c, r, fs)
 
-    if args.file:
+    if args.live:
+        rec = realtime_processing(EnhancementMehtod=GSC_1, angle=angle, Recording=False)
+        rec.audioDevice()
+        print("Start processing...\n")
+        rec.start()
+        while True:
+            a = int(input('"select algorithm: \n'
+                          '0.src  \n'
+                          '1.GSC  \n'))
+            if a == 9:
+                filename = 'output/rec1.wav'
+                print('\nRecording finished: ' + repr(filename))
+                rec.stop()
+                rec.save(filename)
+                break
+            rec.changeAlgorithm(a)
+            # time.sleep(0.1)
+    else:
+        start = time.process_time()
+
         yout = GSC_1.process(x, angle, method=3)
 
         end = time.process_time()
@@ -60,27 +77,10 @@ def main(args):
 
         # save audio
         if args.save:
-            wavfile.write('output/output_gscbeamformer7_mcra_p.wav', 16000, yout['data'])
+            wavfile.write('output_gscy_omlsa_p_pf.wav', 16000, yout['data'])
 
         visual(x[0, :], yout['data'])
         plt.title('spectrum')
-    elif args.live:
-        rec = realtime_processing(EnhancementMehtod=GSC_1, angle=angle, Recording=False)
-        rec.audioDevice()
-        print("Start processing...\n")
-        rec.start()
-        while True:
-            a = int(input('"select algorithm: \n'
-                          '0.src  \n'
-                          '1.GSC  \n'))
-            if a == 9:
-                filename = 'output/rec1.wav'
-                print('\nRecording finished: ' + repr(filename))
-                rec.stop()
-                rec.save(filename)
-                break
-            rec.changeAlgorithm(a)
-            # time.sleep(0.1)
 
 
 if __name__ == "__main__":
@@ -88,7 +88,6 @@ if __name__ == "__main__":
     parser.add_argument("-l", "--live", action='store_true', help="listen microphone")  # if set true
     parser.add_argument("-p", "--play", action='store_true', help="play output")  # if set true
     parser.add_argument("-s", "--save", action='store_true', help="set to save output")  # if set true
-    parser.add_argument("-f", "--file", action='store_true', help="read from file")  # if set true
 
     args = parser.parse_args()
     main(args)

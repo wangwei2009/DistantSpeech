@@ -2,6 +2,7 @@ import numpy as np
 from scipy.signal import windows
 
 from DistantSpeech.noise_estimation.mcra import NoiseEstimationMCRA
+from DistantSpeech.noise_estimation.omlsa_multi import NsOmlsaMulti
 from .beamformer import beamformer
 
 
@@ -66,6 +67,7 @@ class GSC(beamformer):
         self.Yfbf = np.zeros((self.half_bin), dtype=complex)
 
         self.mcra = NoiseEstimationMCRA(nfft=self.nfft)
+        self.omlsa_multi = NsOmlsaMulti(nfft=self.nfft, cal_weights=True)
 
     def data_ext(self, x, axis=-1):
         """
@@ -206,6 +208,11 @@ class GSC(beamformer):
                         WNG[k] = self.calcWNG(a, self.H[:, k, np.newaxis])
                     if retDI:
                         DI[k] = self.calcDI(a, self.H[:, k, np.newaxis], self.Fvv[k, :, :])
+
+            self.omlsa_multi.estimation(np.real(Y*np.conj(Y)), np.real(self.U*np.conj(self.U)).transpose())
+
+            # post-filter
+            Y = Y * self.omlsa_multi.G
 
             Cf = np.fft.irfft(Y)  # *window.sum()
             yout[t * self.hop:t * self.hop + self.frameLen] += Cf * window
