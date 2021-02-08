@@ -51,8 +51,8 @@ class NoiseEstimationBase(object):
     def estimation(self, X):
         pass
 
-    def update_noise_psd(self, Y: np.ndarray):
-        self.alpha_tilde = self.alpha_d + (1 - self.alpha_d) * self.p;  # eq 5,
+    def update_noise_psd(self, Y: np.ndarray, beta=1.0):
+        self.alpha_tilde = self.alpha_d + (1 - self.alpha_d) * self.p  # eq 5,
 
         # eq 4,update noise spectrum
-        self.lambda_d = self.alpha_tilde * self.lambda_d + (1 - self.alpha_tilde) * Y;
+        self.lambda_d = self.alpha_tilde * self.lambda_d + beta * (1 - self.alpha_tilde) * Y
