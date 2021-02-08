@@ -50,8 +50,8 @@ class NsOmlsaMulti(NoiseEstimationBase):
         self.gamma_s = np.ones(self.half_bin)
 
         self.q_hat = np.ones(self.half_bin)
-        self.q_min = 0.01
-        self.q_max = 0.99
+        self.q_min = 1e-6
+        self.q_max = 0.9999
 
         self.alpha_d = 0.85                  # smooth factor for p
 
@@ -82,14 +82,18 @@ class NsOmlsaMulti(NoiseEstimationBase):
 
         self.MU_Y = self.noise_est_fixed.estimation(y)
         for ch in range(self.M - 1):
-            self.MU_U[ch] = self.noise_est_ref[ch].estimation(u[:, ch])
+            self.MU_U[ch, :] = self.noise_est_ref[ch].estimation(u[:, ch])
 
         if self.first_frame == 1:
             self.first_frame = 0
             self.lambda_d = y
+
+            self.zeta_Y = y
+            for ch in range(self.M-1):
+                self.zeta_U[ch, :] = u[:, ch]
         else:
 
-            alpha = 0.92
+            alpha = 0.921
 
             self.zeta_Y = self.smooth_psd(y, self.zeta_Y, self.win, self.alpha_s)  # Eq 21
             for ch in range(self.M - 1):
@@ -139,12 +143,12 @@ class NsOmlsaMulti(NoiseEstimationBase):
             # Eq 28, the signal presence probability
             self.p = 1 / (1 + self.q_hat / (1 - self.q_hat) * (1 + self.xi_hat) * np.exp(-1 * nu))
 
-            self.update_noise_psd(y)
+            self.update_noise_psd(y, beta=1.47)
 
             # Eq.35, OMLSA gain function
             if self.cal_weights:
                 self.G = np.power(self.G_H1, self.p) * np.power(self.Gmin, (1 - self.p))
-                self.G = np.minimum(self.G, 1)
+                self.G = np.maximum(np.minimum(self.G, 1), self.Gmin)
 
             return self.lambda_d
 
@@ -174,7 +178,7 @@ def main(args):
     print(x.shape)
     channel = x.shape[0]
 
-    transform = Transform(n_fft=320, hop_length=160, channel=channel)
+    transform = Transform(n_fft=512, hop_length=256, channel=channel)
 
     D = transform.stft(x.transpose())     # [F,T,Ch]
     Y, _ = transform.magphase(D, 2)
@@ -182,7 +186,7 @@ def main(args):
     pmesh(librosa.power_to_db(Y[:, :, -1]))
     plt.savefig('pmesh.png')
 
-    omlsa_multi = NsOmlsaMulti(nfft=320, cal_weights=True)
+    omlsa_multi = NsOmlsaMulti(nfft=512, cal_weights=True)
     noise_psd = np.zeros((Y.shape[0], Y.shape[1]))
     p = np.zeros((Y.shape[0], Y.shape[1]))
     Yout = np.zeros((Y.shape[0], Y.shape[1]), dtype=type(Y))
