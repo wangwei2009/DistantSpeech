@@ -41,7 +41,7 @@ class NoiseEstimationBase(object):
 
         # smoothing in frequency
         smoothed_f = convolve(x, win)
-        smoothed_f_val = smoothed_f[(w + 1) / 2:-(w + 1) / 2]
+        smoothed_f_val = smoothed_f[int((w - 1) / 2):int(-((w - 1) / 2))]
 
         # smoothing in time
         smoothed_x = alpha * previous_x + (1 - alpha) * smoothed_f_val
