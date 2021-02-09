@@ -36,11 +36,11 @@ def main(args):
     fs = sr
 
     MicArrayObj = MicArray(arrayType='circular', r=0.032, M=4)
-    angle = np.array([197, 0]) / 180 * np.pi
 
     GSC_1 = GSC(MicArrayObj, frameLen, hop, nfft, c, r, fs)
 
     if args.live:
+        angle = np.array([270, 0]) / 180 * np.pi     # target direction
         rec = realtime_processing(EnhancementMehtod=GSC_1, angle=angle, Recording=False)
         rec.audioDevice()
         print("Start processing...\n")
@@ -58,6 +58,8 @@ def main(args):
             rec.changeAlgorithm(a)
             # time.sleep(0.1)
     else:
+        angle = np.array([197, 0]) / 180 * np.pi  # target direction
+
         start = time.process_time()
 
         yout = GSC_1.process(x, angle, method=3)

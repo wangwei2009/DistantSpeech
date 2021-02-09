@@ -3,6 +3,7 @@ from scipy.signal import windows
 
 from DistantSpeech.noise_estimation.mcra import NoiseEstimationMCRA
 from DistantSpeech.noise_estimation.omlsa_multi import NsOmlsaMulti
+from DistantSpeech.transform.transform import Transform
 from .beamformer import beamformer
 
 
@@ -33,6 +34,10 @@ class GSC(beamformer):
         self.win_scale = np.sqrt(1.0 / self.window.sum() ** 2)
         self.freq_bin = np.linspace(0, self.half_bin - 1, self.half_bin)
         self.omega = 2 * np.pi * self.freq_bin * self.fs / self.nfft
+
+        self.window = np.sqrt(windows.hann(self.frameLen, sym=False))
+
+        self.transformer = Transform(n_fft=self.nfft, hop_length=self.hop, channel=self.M)
 
         self.pad_data = np.zeros([MicArray.M, round(frameLen / 2)])
         self.last_output = np.zeros(round(frameLen / 2))
@@ -84,18 +89,12 @@ class GSC(beamformer):
         beamformer process function
 
         """
-        x = self.data_ext(x)
-        self.pad_data = x[:, -1 * round(self.nfft / 2):]
-        frameNum = round((len(x[1, :]) - self.overlap) // self.hop)
+        X = self.transformer.stft(x.transpose())
+        frameNum = X.shape[1]
+
         M = len(x[:, 1])
 
-        outputlength = self.frameLen + (frameNum - 1) * self.hop
-        norm = np.zeros(outputlength, dtype=x.dtype)
-
-        # window = windows.hann(self.frameLen, sym=False)
-        window = np.sqrt(windows.hann(self.frameLen, sym=False))
-        norm[:round(self.nfft / 2)] += window[round(self.nfft / 2):] ** 2
-        win_scale = np.sqrt(1.0 / window.sum() ** 2)
+        outputlength = x.shape[1]
 
         tao = -1 * self.r * np.cos(angle[1]) * np.cos(angle[0] - self.gamma) / self.c
 
@@ -142,10 +141,11 @@ class GSC(beamformer):
                 for i in range(0, M - 1):
                     self.BM[0, i, k] = a_k[0]
                     self.BM[i + 1, i, k] = -1 * a_k[i + 1]
-        Y = np.ones([self.half_bin], dtype=complex)
+        Y = np.ones([self.half_bin, frameNum], dtype=complex)
         for t in range(0, frameNum):
-            xt = x[:, t * self.hop:t * self.hop + self.frameLen] * window
-            Z = np.fft.rfft(xt)  # *win_scale
+            # xt = x[:, t * self.hop:t * self.hop + self.frameLen] * self.window
+            Z = X[:, t, :].transpose()
+            # Z = np.fft.rfft(xt)  # *win_scale
             if (all(angle == self.angle) is False) or (method != self.AlgorithmIndex):
                 # update look angle and algorithm
                 if all(angle == self.angle) is False:
@@ -159,73 +159,50 @@ class GSC(beamformer):
 
             self.mcra.estimation(np.abs(Z[0, :] * np.conj(Z[0, :])))
 
-            # if t < 300:
-            #     is_speech = 0
-            # else:
-            #     is_speech = 1
+            if self.AlgorithmIndex == 0:
+                Y[:, t] = Z[0, :]  # output channel_1
+            else:
+                for k in range(0, self.half_bin):
+                    a = np.mat(np.exp(-1j * self.omega[k] * tao)).T  # propagation vector
 
-            for k in range(0, self.half_bin):
-                a = np.mat(np.exp(-1j * self.omega[k] * tao)).T  # propagation vector
-                # recursive average Ryy
-                self.Ryy[k, :, :] = alpha_y * self.Ryy[k, :, :] + (1 - alpha_y) * np.dot(Z[:, k, np.newaxis],
-                                                                                         Z[:, k,
-                                                                                         np.newaxis].conj().transpose())
-                if self.mcra.p[k] > 0.5:
-                    is_speech = 1
-                else:
-                    is_speech = 0
+                    if self.mcra.p[k] > 0.5:
+                        is_speech = 1
+                    else:
+                        is_speech = 0
 
-                if is_speech == 0:
-                    # recursive average Rvv
-                    self.Rvv[k, :, :] = alpha_v * self.Rvv[k, :, :] + (1 - alpha_v) * np.dot(Z[:, k, np.newaxis],
-                                                                                             Z[:, k,
-                                                                                             np.newaxis].conj().transpose())
-                # if self.frameCount == 200 and self.calc == 0:
+                    # if self.frameCount == 200 and self.calc == 0:
 
-                if t > 312 and k == self.half_bin - 1:
-                    # reset weights update flag
-                    self.calc = 0
-                # print("calculating MVDR weights...\n")
-                Diagonal = 1e-6
+                    if t > 312 and k == self.half_bin - 1:
+                        # reset weights update flag
+                        self.calc = 0
+                    # print("calculating MVDR weights...\n")
+                    Diagonal = 1e-6
 
-                if self.AlgorithmIndex == 0:
-                    Y[k] = Z[0, k]  # output channel_1
-                else:
                     # generate the reference noise signals
                     self.U[:, k] = np.squeeze(self.BM[:, :, k]).conj().T @ Z[:, k]
                     # fixed beamformer output
                     self.Yfbf[k] = self.W[:, k].conj().T @ Z[:, k]
 
                     # residual output
-                    Y[k] = self.Yfbf[k] - self.G[:, k].conj().T @ self.U[:, k]
+                    Y[k, t] = self.Yfbf[k] - self.G[:, k].conj().T @ self.U[:, k]
 
                     # use speech presence probability to control AIC update
                     self.Pest[k] = 1  # rho * self.Pest[k] + (1 - rho) * np.sum(np.power(np.abs(Z[:,k]),2))
                     # update MNC weights
-                    self.G[:, k] = self.G[:, k] + mu * (1 - self.mcra.p[k]) * self.U[:, k] * Y[k].conj() / self.Pest[k]
+                    self.G[:, k] = self.G[:, k] + mu * (1 - self.mcra.p[k]) * self.U[:, k] * Y[k, t].conj() / self.Pest[k]
 
                     if retWNG:
                         WNG[k] = self.calcWNG(a, self.H[:, k, np.newaxis])
                     if retDI:
                         DI[k] = self.calcDI(a, self.H[:, k, np.newaxis], self.Fvv[k, :, :])
 
-            self.omlsa_multi.estimation(np.real(Y*np.conj(Y)), np.real(self.U*np.conj(self.U)).transpose())
+                self.omlsa_multi.estimation(np.real(self.Yfbf*np.conj(self.Yfbf)),
+                                            np.real(self.U*np.conj(self.U)).transpose())
 
-            # post-filter
-            Y = Y * self.omlsa_multi.G
+                # post-filter
+                Y[:, t] = Y[:, t] * self.omlsa_multi.G
 
-            Cf = np.fft.irfft(Y)  # *window.sum()
-            yout[t * self.hop:t * self.hop + self.frameLen] += Cf * window
-            norm[..., t * self.hop:t * self.hop + self.frameLen] += window ** 2
-
-            if self.frameCount < self.estPos:
-                self.frameCount = self.frameCount + 1
-        norm[..., -1 * round(self.nfft / 2):] += window[:round(self.nfft / 2)] ** 2
-        # yout /= np.where(norm > 1e-10, norm, 1.0)
-
-        yout[:round(self.nfft / 2)] += self.last_output
-        self.last_output = yout[-1 * round(self.nfft / 2):]
-        yout = yout[:-1 * round(self.nfft / 2)]
+        yout = self.transformer.istft(Y)
 
         # calculate beampattern
         if retH:
