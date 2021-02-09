@@ -27,10 +27,10 @@ def main(args):
     r = 0.032
     c = 343
 
-    frameLen = 256
+    frameLen = 512
     hop = frameLen / 2
     overlap = frameLen - hop
-    nfft = 256
+    nfft = 512
     c = 340
     r = 0.032
     fs = sr
@@ -79,7 +79,8 @@ def main(args):
 
         # save audio
         if args.save:
-            wavfile.write('output_gscy_omlsa_p_pf.wav', 16000, yout['data'])
+            audio = (yout['data'] * np.iinfo(np.int16).max).astype(np.int16)
+            wavfile.write('output/output_gsc_omlsa_p_Y_pf5.wav', 16000, audio)
 
         visual(x[0, :], yout['data'])
         plt.title('spectrum')

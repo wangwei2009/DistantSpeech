@@ -196,7 +196,7 @@ class GSC(beamformer):
                     if retDI:
                         DI[k] = self.calcDI(a, self.H[:, k, np.newaxis], self.Fvv[k, :, :])
 
-                self.omlsa_multi.estimation(np.real(self.Yfbf*np.conj(self.Yfbf)),
+                self.omlsa_multi.estimation(np.real(Y[:, t]*np.conj(Y[:, t])),
                                             np.real(self.U*np.conj(self.U)).transpose())
 
                 # post-filter
