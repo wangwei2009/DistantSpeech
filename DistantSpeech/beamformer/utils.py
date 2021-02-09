@@ -1,10 +1,11 @@
-import numpy as np
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 import os
 
 import librosa
 import librosa.display
+import matplotlib.pyplot as plt
+import numpy as np
+from mpl_toolkits.mplot3d import Axes3D
+
 
 def spec(x):
     D = librosa.stft(x)  # STFT of y
@@ -87,15 +88,23 @@ def load_wav(filepath):
     import librosa
     filename = find_files(filepath,".wav")
     wavdata_list = []
+    is_channel_1 = 1
+    min_len = 0
     for names in filename:
-        x1, sr = librosa.load(os.path.join(filepath,names), sr=None)
+        x1, sr = librosa.load(os.path.join(filepath, names), sr=None)
+        if is_channel_1:
+            min_len = len(x1)
+            is_channel_1 = 0
+        else:
+            if len(x1) < min_len:
+                min_len = len(x1)
         wavdata_list.append(x1)
-    L = len(wavdata_list[0])
+
     M = len(filename)
-    wavdata = np.zeros([M,L])
-    for i in range(0,M):
-        wavdata[i,:] = wavdata_list[i]
-    return wavdata,sr     # return M*L ndarray
+    wavdata = np.zeros([M, min_len])
+    for i in range(0, M):
+        wavdata[i, :] = wavdata_list[i][:min_len]
+    return wavdata, sr     # return M*L ndarray
 
 
 def load_pcm(filepath):
@@ -104,7 +113,6 @@ def load_pcm(filepath):
     :return M*L ndarray
 
     """
-    import librosa
     import numpy as np
     filename = find_files(filepath,".pcm")
     wavdata_list = []
