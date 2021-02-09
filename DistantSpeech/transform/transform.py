@@ -413,6 +413,11 @@ class Transform(object):
         self.half_bin = int(self.n_fft / 2 + 1)
 
     def stft(self, x):
+        """
+        streaming multi-channel Short Time Fourier Transform
+        :param x: [samples, channels] or [samples,]
+        :return: [half_bin, frames, channels] or [half_bin, frames]
+        """
         if len(x.shape) == 1:  # single channel
             x = x[:, np.newaxis]
         x = np.vstack((self.previous_input, x))
@@ -428,6 +433,13 @@ class Transform(object):
         return np.squeeze(Y)
 
     def istft(self, Y):
+        """
+        streaming single channel inverse short time fourier transform
+        :param Y: [half_bin, frames]
+        :return: single channel time data
+        """
+        if len(Y.shape) == 1:  # single frame
+            Y = Y[:, np.newaxis]
         x = istft(Y, hop_length=self.hop_length, win_length=self.n_fft, center=False, window=self.window)
         x[:self.hop_length] += self.previous_output[:, 0]
         self.previous_output[:, 0] = x[-self.hop_length:]
