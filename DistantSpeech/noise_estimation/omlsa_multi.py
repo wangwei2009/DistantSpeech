@@ -51,7 +51,7 @@ class NsOmlsaMulti(NoiseEstimationBase):
 
         self.q_hat = np.ones(self.half_bin)
         self.q_min = 1e-6
-        self.q_max = 0.9999
+        self.q_max = 0.9999998
 
         self.alpha_d = 0.85                  # smooth factor for p
 
@@ -162,6 +162,7 @@ def main(args):
     from scipy.io import wavfile
 
     filepath = "./test_audio/rec1/"              # [u1,u2,u3,y]
+    filepath = "./test_audio/rec1_mcra_gsc/"     # [y,u1,u2,u3]
     x, sr = load_wav(os.path.abspath(filepath))  # [channel, samples]
     sr = 16000
     r = 0.032
@@ -195,10 +196,10 @@ def main(args):
     start = time.process_time()
 
     for n in range(Y.shape[1]):
-        omlsa_multi.estimation(Y[:, n, -1], Y[:, n, :3])
+        omlsa_multi.estimation(Y[:, n, 0], Y[:, n, 1:])
         noise_psd[:, n] = omlsa_multi.lambda_d
         p[:, n] = omlsa_multi.p
-        Yout[:, n] = D[:, n, -1] * omlsa_multi.G
+        Yout[:, n] = D[:, n, 0] * omlsa_multi.G
 
     end = time.process_time()
     print(end - start)
@@ -216,7 +217,7 @@ def main(args):
 
     # save audio
     if args.save:
-        wavfile.write('output_omlsa_multi.wav', 16000, y)
+        wavfile.write('output_omlsa_multi4.wav', 16000, y)
 
 
 if __name__ == "__main__":
