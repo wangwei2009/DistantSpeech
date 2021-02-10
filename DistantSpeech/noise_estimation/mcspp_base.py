@@ -102,7 +102,7 @@ class McSppBase(object):
         for k in range(self.half_bin):
             self.Phi_yy[:, :, k] = self.alpha * self.Phi_yy[:, :, k] + (1 - self.alpha) * (np.conj(y[k:k+1, :]).transpose() @ y[k:k+1, :])
 
-            if self.frm_cnt < 200:
+            if self.frm_cnt < 100:
                 self.Phi_vv[:, :, k] = self.Phi_yy[:, :, k]
 
             self.Phi_xx = self.Phi_yy - self.Phi_vv
@@ -115,7 +115,7 @@ class McSppBase(object):
             self.gamma[k] = y[k:k+1, :] @ Phi_vv_inv @ self.Phi_xx[:, :, k] @ Phi_vv_inv @ np.conj(y[k:k+1, :]).transpose()
 
         self.compute_p(p_max=0.99, p_min=0.01)
-        self.update_noise_psd(y, beta=1.0)
+        # self.update_noise_psd(y, beta=1.0)
 
         self.frm_cnt = self.frm_cnt + 1
 
