@@ -8,6 +8,8 @@ Multi-Channel Speech Presence Probability
 .. [1] M. Souden, J. Chen, J. Benesty and S. Affes, "Gaussian Model-Based Multichannel Speech Presence Probability,"
     in IEEE Transactions on Audio, Speech, and Language Processing, vol. 18, no. 5, pp. 1072-1077, July 2010,
     doi: 10.1109/TASL.2009.2035150.
+   [2] Bagheri, S., Giacobello, D. (2019) Exploiting Multi-Channel Speech Presence Probability in Parametric
+    Multi-Channel Wiener Filter. Proc. Interspeech 2019, 101-105, DOI: 10.21437/Interspeech.2019-2665
 
 """
 
@@ -15,6 +17,8 @@ import os
 
 import numpy as np
 from scipy.signal import convolve
+
+from DistantSpeech.noise_estimation.mcra import NoiseEstimationMCRA
 
 
 class McSppBase(object):
@@ -43,14 +47,19 @@ class McSppBase(object):
         self.q = np.ones(self.half_bin) * 0.6
         self.p = np.zeros(self.half_bin)
         self.alpha_tilde = np.zeros(self.half_bin)
+        self.G_H1 = np.zeros(self.half_bin)
+        self.G = np.zeros(self.half_bin)
 
         self.Phi_yy = np.zeros((self.channels, self.channels, self.half_bin))
         self.Phi_vv = np.zeros((self.channels, self.channels, self.half_bin))
+        self.Phi_vv_inv = np.zeros((self.channels, self.channels, self.half_bin))
         self.Phi_xx = np.zeros((self.channels, self.channels, self.half_bin))
 
         self.xi = np.zeros(self.half_bin)
         self.gamma = np.zeros(self.half_bin)
         self.L = 125
+
+        self.mcra = NoiseEstimationMCRA(nfft=self.nfft)
 
         self.frm_cnt = 0
 
@@ -63,7 +72,12 @@ class McSppBase(object):
     def compute_prior_snr(self, y):
         pass
 
-    def compute_q(self, y):
+    def compute_q(self, y, q_max=0.99, q_min=0.01):
+
+        self.mcra.estimation(np.abs(y[:, 0] * np.conj(y[:, 0])))
+
+        self.q = np.sqrt(1 - self.mcra.p/2)
+        self.q = np.minimum(np.maximum(self.q, q_min), q_max)
 
         return self.q
 
@@ -76,6 +90,13 @@ class McSppBase(object):
         """
         self.p = 1 / (1 + self.q / (1 - self.q) * (1 + self.xi) * np.exp(-1 * (self.gamma / (1 + self.xi))))
         self.p = np.minimum(np.maximum(self.p, p_min), p_max)
+
+    def compute_weight(self, xi, Gmin=0.0631):
+        self.G_H1 = self.xi / (1 + self.xi)
+        self.G = np.power(self.G_H1, self.p) * np.power(Gmin, (1 - self.p))
+        self.G = np.maximum(np.minimum(self.G, 1), Gmin)
+        self.G[:2] = 0
+
 
     def smooth_psd(self, x, previous_x, win, alpha):
         """
@@ -100,7 +121,8 @@ class McSppBase(object):
     def estimation(self, y):
 
         for k in range(self.half_bin):
-            self.Phi_yy[:, :, k] = self.alpha * self.Phi_yy[:, :, k] + (1 - self.alpha) * (np.conj(y[k:k+1, :]).transpose() @ y[k:k+1, :])
+            self.Phi_yy[:, :, k] = self.alpha * self.Phi_yy[:, :, k] + (1 - self.alpha) * \
+                                   np.real((np.conj(y[k:k+1, :]).transpose() @ y[k:k+1, :]))
 
             if self.frm_cnt < 100:
                 self.Phi_vv[:, :, k] = self.Phi_yy[:, :, k]
@@ -110,12 +132,15 @@ class McSppBase(object):
             Phi_vv_inv = np.linalg.inv(self.Phi_vv[:, :, k] + np.eye(self.channels)*1e-6)
 
             self.xi[k] = np.trace(Phi_vv_inv @ self.Phi_yy[:, :, k]) - self.channels
-            self.xi[k] = np.maximum(self.xi[k], 1e-6)
+            self.xi[k] = np.minimum(np.maximum(self.xi[k], 1e-6), 100.0)
 
-            self.gamma[k] = y[k:k+1, :] @ Phi_vv_inv @ self.Phi_xx[:, :, k] @ Phi_vv_inv @ np.conj(y[k:k+1, :]).transpose()
+            self.gamma[k] = np.real(y[k:k+1, :] @ Phi_vv_inv @ self.Phi_xx[:, :, k] @ Phi_vv_inv @ np.conj(y[k:k+1, :]).transpose())
+            self.gamma[k] = np.minimum(np.maximum(self.gamma[k], 1e-6), 1000.0)
 
+        self.compute_q(y)
         self.compute_p(p_max=0.99, p_min=0.01)
-        # self.update_noise_psd(y, beta=1.0)
+        self.update_noise_psd(y, beta=1.0)
+        self.compute_weight(self.xi)
 
         self.frm_cnt = self.frm_cnt + 1
 
@@ -130,8 +155,8 @@ class McSppBase(object):
 
         # eq.17 in [1]
         for k in range(self.half_bin):
-            self.Phi_vv[:, :, k] = self.alpha_tilde[k] * self.Phi_vv[:, :, k] + \
-                                  beta * (1 - self.alpha_tilde[k]) * (np.conj(y[k:k+1, :]).transpose() @ y[k:k+1, :])
+            self.Phi_vv[:, :, k] = np.real(self.alpha_tilde[k] * self.Phi_vv[:, :, k] + beta *
+                                           (1 - self.alpha_tilde[k]) * (np.conj(y[k:k+1, :]).transpose() @ y[k:k+1, :]))
 
 
 def main(args):
@@ -177,14 +202,14 @@ def main(args):
     start = time.process_time()
 
     for n in range(Y.shape[1]):
-        mcspp.estimation(Y[:, n, :])
+        mcspp.estimation(D[:, n, :])
         p[:, n] = mcspp.p
-        # Yout[:, n] = D[:, n, 0] * omlsa_multi.G
+        Yout[:, n] = D[:, n, 0] * mcspp.G
 
     end = time.process_time()
     print(end - start)
 
-    # y = transform.istft(Yout)
+    y = transform.istft(Yout)
 
     # pmesh(librosa.power_to_db(noise_psd))
     # plt.savefig('noise_psd.png')
@@ -197,7 +222,8 @@ def main(args):
 
     # save audio
     if args.save:
-        wavfile.write('output_omlsa_multi4.wav', 16000, y)
+        audio = (y * np.iinfo(np.int16).max).astype(np.int16)
+        wavfile.write('output/output_mcspp91.wav', 16000, audio)
 
 
 if __name__ == "__main__":
