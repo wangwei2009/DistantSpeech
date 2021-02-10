@@ -2,6 +2,7 @@ import numpy as np
 from scipy.signal import windows
 
 from DistantSpeech.noise_estimation.mcra import NoiseEstimationMCRA
+from DistantSpeech.noise_estimation.mcspp_base import McSppBase
 from DistantSpeech.noise_estimation.omlsa_multi import NsOmlsaMulti
 from DistantSpeech.transform.transform import Transform
 from .beamformer import beamformer
@@ -73,6 +74,7 @@ class GSC(beamformer):
 
         self.mcra = NoiseEstimationMCRA(nfft=self.nfft)
         self.omlsa_multi = NsOmlsaMulti(nfft=self.nfft, cal_weights=True)
+        self.mcspp = McSppBase(nfft=self.nfft)
 
     def data_ext(self, x, axis=-1):
         """
@@ -143,6 +145,7 @@ class GSC(beamformer):
                     self.BM[i + 1, i, k] = -1 * a_k[i + 1]
         Y = np.ones([self.half_bin, frameNum], dtype=complex)
         for t in range(0, frameNum):
+            self.mcspp.estimation(X[:, t, :])
             # xt = x[:, t * self.hop:t * self.hop + self.frameLen] * self.window
             Z = X[:, t, :].transpose()
             # Z = np.fft.rfft(xt)  # *win_scale
@@ -189,7 +192,7 @@ class GSC(beamformer):
                     # use speech presence probability to control AIC update
                     self.Pest[k] = 1  # rho * self.Pest[k] + (1 - rho) * np.sum(np.power(np.abs(Z[:,k]),2))
                     # update MNC weights
-                    self.G[:, k] = self.G[:, k] + mu * (1 - self.mcra.p[k]) * self.U[:, k] * Y[k, t].conj() / self.Pest[k]
+                    self.G[:, k] = self.G[:, k] + mu * (1 - self.mcspp.p[k]) * self.U[:, k] * Y[k, t].conj() / self.Pest[k]
 
                     if retWNG:
                         WNG[k] = self.calcWNG(a, self.H[:, k, np.newaxis])
@@ -200,7 +203,7 @@ class GSC(beamformer):
                                             np.real(self.U*np.conj(self.U)).transpose())
 
                 # post-filter
-                Y[:, t] = Y[:, t] * self.omlsa_multi.G
+                Y[:, t] = Y[:, t] * self.mcspp.G
 
         yout = self.transformer.istft(Y)
 
