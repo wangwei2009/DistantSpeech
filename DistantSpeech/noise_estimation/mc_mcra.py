@@ -48,8 +48,18 @@ class McMcra(McSppBase):
 
         self.psi = np.zeros(self.half_bin)
         self.psi_tilde = np.zeros(self.half_bin)
+        self.psi_global = np.zeros(self.half_bin)
+        self.psi_frame = []
         self.q = np.ones(self.half_bin) * 0.6
         self.q_local = np.ones(self.half_bin) * 0.999
+        self.q_global = np.ones(self.half_bin)
+        self.q_frame = []
+        self.q_max = 0.99
+        self.q_min = 0
+
+        self.psi_0 = 100
+        self.psi_tilde_0 = 100
+
         self.p = np.zeros(self.half_bin)
         self.alpha_tilde = np.zeros(self.half_bin)
         self.G_H1 = np.zeros(self.half_bin)
@@ -77,7 +87,23 @@ class McMcra(McSppBase):
     def compute_prior_snr(self, y):
         pass
 
-    def compute_q(self, y, Phi_vv_inv, Phi_yy, k, q_max=0.99, q_min=0.01):
+    def compute_q_local(self, y, Phi_vv_inv, Phi_yy, k, q_max=0.99, q_min=0.01):
+        # eq.10,
+        self.psi[k] = np.real(y @ Phi_vv_inv @ np.conj(y).transpose())
+        self.psi_tilde[k] = np.real(np.trace(Phi_vv_inv @ Phi_yy))
+
+        if self.psi[k] >= self.psi_0 or self.psi_tilde[k] > self.psi_tilde_0:
+            self.q_local[k] = q_min
+        elif self.psi_tilde[k] < self.M:
+            self.q_local[k] = q_max
+        else:
+            self.q_local[k] = (self.psi_tilde_0 - self.psi_tilde[k])/(self.psi_tilde_0 - self.M)
+
+            self.q_local[k] = np.minimum(np.maximum(self.q_local[k], q_min), q_max)
+
+        return self.q_local[k]
+
+    def compute_q(self, y):
         """
 
         :param y:
@@ -89,22 +115,27 @@ class McMcra(McSppBase):
         :return:
         """
 
-        # eq.10,
-        self.psi[k] = np.real(y @ Phi_vv_inv @ np.conj(y).transpose())
-        self.psi_tilde[k] = np.real(np.trace(Phi_vv_inv @ Phi_yy))
-
-        psi_0 = 100
-        psi_tilde_0 = 100
-        if self.psi[k] >= psi_0 or self.psi_tilde[k] > psi_tilde_0:
-            self.q_local[k] = q_min
-        elif self.psi_tilde[k] < self.M:
-            self.q_local[k] = q_max
+        self.psi_global = self.smooth_psd(self.psi, self.psi_global, self.win, 0)
+        frame_range = np.array([60, 2000])
+        frame_range = frame_range * self.nfft / 16000
+        psi_frame = np.mean(self.psi_global[int(frame_range[0]):int(frame_range[1])])
+        self.psi_frame.append(psi_frame)
+        for k in range(self.half_bin):
+            if self.psi_global[k] < self.psi_0:
+                self.q_global[k] = self.q_max
+            else:
+                self.q_global[k] = self.q_min
+        if psi_frame < self.psi_0/8:
+            q_frame = self.q_max
         else:
-            self.q_local[k] = (psi_tilde_0 - self.psi_tilde[k])/(psi_tilde_0 - self.M)
+            q_frame = self.q_min
 
-            self.q_local[k] = np.minimum(np.maximum(self.q_local[k], q_min), q_max)
+        # self.q_frame.append(q_frame)
 
-        return self.q_local[k]
+        # self.q = self.q_local * self.q_global * q_frame
+        self.q = self.q_local
+
+        return self.q
 
     def compute_p(self, p_max=1.0, p_min=0.0):
         """
@@ -162,9 +193,9 @@ class McMcra(McSppBase):
             self.gamma[k] = np.real(y[k:k+1, :] @ Phi_vv_inv @ self.Phi_xx[:, :, k] @ Phi_vv_inv @ np.conj(y[k:k+1, :]).transpose())
             self.gamma[k] = np.minimum(np.maximum(self.gamma[k], 1e-6), 1000.0)
 
-            self.q[k] = self.compute_q(y[k:k+1, :], Phi_vv_inv, self.Phi_yy[:, :, k], k)
+            self.q_local[k] = self.compute_q_local(y[k:k + 1, :], Phi_vv_inv, self.Phi_yy[:, :, k], k)
 
-        # self.compute_q(y)
+        self.compute_q(y)
         self.compute_p(p_max=0.99, p_min=0.01)
         self.update_noise_psd(y, beta=1.0)
         self.compute_weight(self.xi)
