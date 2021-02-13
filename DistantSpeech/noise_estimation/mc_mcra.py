@@ -5,9 +5,8 @@ Multi-Channel Speech Presence Probability
 ----------
 
 
-.. [1] M. Souden, J. Chen, J. Benesty and S. Affes, "Gaussian Model-Based Multichannel Speech Presence Probability,"
-    in IEEE Transactions on Audio, Speech, and Language Processing, vol. 18, no. 5, pp. 1072-1077, July 2010,
-    doi: 10.1109/TASL.2009.2035150.
+.. [1] M. Souden, J. Chen, J. Benesty, and S. Affes, An integrated solution for online multichannel noise tracking and
+    reduction, IEEE Trans. Audio, Speech, Lang. Process., vol. 19, no. 7, pp. 2159–2169, Sep. 2011.
    [2] Bagheri, S., Giacobello, D. (2019) Exploiting Multi-Channel Speech Presence Probability in Parametric
     Multi-Channel Wiener Filter. Proc. Interspeech 2019, 101-105, DOI: 10.21437/Interspeech.2019-2665
 
