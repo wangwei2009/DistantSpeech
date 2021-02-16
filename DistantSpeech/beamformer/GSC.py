@@ -10,7 +10,7 @@ from .beamformer import beamformer
 
 class GSC(beamformer):
 
-    def __init__(self, MicArray, frameLen=256, hop=None, nfft=None, c=343, r=0.032, fs=16000):
+    def __init__(self, MicArray, frameLen=256, hop=None, nfft=None, channels=4, c=343, r=0.032, fs=16000):
 
         beamformer.__init__(self, MicArray)
         self.MicArray = MicArray
@@ -28,7 +28,7 @@ class GSC(beamformer):
         self.r = r
         self.fs = fs
         self.half_bin = round(nfft / 2 + 1)
-        self.M = 4
+        self.M = channels
         self.angle = np.array([197, 0]) / 180 * np.pi
         self.gamma = MicArray.gamma
         self.window = windows.hann(self.frameLen, sym=False)
@@ -73,8 +73,8 @@ class GSC(beamformer):
         self.Yfbf = np.zeros((self.half_bin), dtype=complex)
 
         self.mcra = NoiseEstimationMCRA(nfft=self.nfft)
-        self.omlsa_multi = NsOmlsaMulti(nfft=self.nfft, cal_weights=True)
-        self.mcspp = McSppBase(nfft=self.nfft)
+        self.omlsa_multi = NsOmlsaMulti(nfft=self.nfft, cal_weights=True, M=channels)
+        self.mcspp = McSppBase(nfft=self.nfft, channels=channels)
 
     def data_ext(self, x, axis=-1):
         """
