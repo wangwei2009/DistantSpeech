@@ -3,6 +3,7 @@ import os
 import librosa
 import librosa.display
 import matplotlib.pyplot as plt
+from matplotlib import cm
 import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
 
@@ -48,7 +49,8 @@ def mesh(array2D):
     X, Y = np.meshgrid(X, Y)
     fig1 = plt.figure()
     ax = Axes3D(fig1)
-    ax.plot_surface(X, Y, array2D)
+    surf = ax.plot_surface(X, Y, array2D, cmap=cm.coolwarm, linewidth=0, antialiased=False)
+    fig1.colorbar(surf, shrink=0.5, aspect=5)
     # plt.show()
 
 def pmesh(array2D):
@@ -61,7 +63,8 @@ def pmesh(array2D):
     X = np.arange(0, size[1], 1)
     X, Y = np.meshgrid(X, Y)
 
-    plt.pcolormesh(X, Y, array2D)
+    im = plt.pcolormesh(X, Y, array2D)
+    plt.colorbar(im)
     plt.show()
 
 
