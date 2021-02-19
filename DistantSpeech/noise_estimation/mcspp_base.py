@@ -59,6 +59,9 @@ class McSppBase(object):
         self.gamma = np.zeros(self.half_bin)
         self.L = 125
 
+        self.win = np.array([0.25, 0.5, 0.25])
+        self.alpha_s = 0.8
+
         self.mcra = NoiseEstimationMCRA(nfft=self.nfft)
 
         self.frm_cnt = 0
