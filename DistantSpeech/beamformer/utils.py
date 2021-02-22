@@ -63,7 +63,7 @@ def pmesh(array2D):
     X = np.arange(0, size[1], 1)
     X, Y = np.meshgrid(X, Y)
 
-    im = plt.pcolormesh(X, Y, array2D)
+    im = plt.pcolormesh(X, Y, array2D, shading='auto')
     plt.colorbar(im)
     plt.show()
 
