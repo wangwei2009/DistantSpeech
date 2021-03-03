@@ -111,7 +111,6 @@ class McSppBase(object):
         self.G = np.maximum(np.minimum(self.G, 1), Gmin)
         self.G[:2] = 0
 
-
     def smooth_psd(self, x, previous_x, win, alpha):
         """
         smooth spectrum in frequency and time
@@ -136,11 +135,11 @@ class McSppBase(object):
 
         self.estimate_noisy_psd(y, self.alpha)
 
+        self.Phi_xx = self.Phi_yy - self.Phi_vv
+
         for k in range(self.half_bin):
             # if self.frm_cnt < 10:
             #     self.Phi_vv[:, :, k] = self.Phi_yy[:, :, k]
-
-            self.Phi_xx[:, :, k] = self.Phi_yy[:, :, k] - self.Phi_vv[:, :, k]
 
             Phi_vv_inv = np.linalg.inv(self.Phi_vv[:, :, k] + np.eye(self.channels)*1e-6)
 
