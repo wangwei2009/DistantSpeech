@@ -17,6 +17,9 @@ import os
 
 import numpy as np
 from scipy.signal import convolve
+import soundfile as sf
+from pesq import pesq
+from pystoi.stoi import stoi
 
 from DistantSpeech.noise_estimation.mcra import NoiseEstimationMCRA
 
@@ -54,6 +57,8 @@ class McSppBase(object):
         self.Phi_vv = np.zeros((self.channels, self.channels, self.half_bin))
         self.Phi_vv_inv = np.zeros((self.channels, self.channels, self.half_bin))
         self.Phi_xx = np.zeros((self.channels, self.channels, self.half_bin))
+
+        self.psd_yy = np.zeros((self.half_bin, self.channels, self.channels), dtype=np.complex128)
 
         self.xi = np.zeros(self.half_bin)
         self.gamma = np.zeros(self.half_bin)
@@ -123,14 +128,16 @@ class McSppBase(object):
 
     def estimation(self, y):
 
+        # [F,C] *[F,C]->[F,C,C]
+        self.psd_yy = np.einsum('ij,il->ijl', y.conj(), y)
+        # smooth
+        self.Phi_yy = self.alpha * self.Phi_yy + (1 - self.alpha) * np.real(np.transpose(self.psd_yy, (1, 2, 0)))
+
         for k in range(self.half_bin):
-            self.Phi_yy[:, :, k] = self.alpha * self.Phi_yy[:, :, k] + (1 - self.alpha) * \
-                                   np.real((np.conj(y[k:k+1, :]).transpose() @ y[k:k+1, :]))
+            # if self.frm_cnt < 10:
+            #     self.Phi_vv[:, :, k] = self.Phi_yy[:, :, k]
 
-            if self.frm_cnt < 100:
-                self.Phi_vv[:, :, k] = self.Phi_yy[:, :, k]
-
-            self.Phi_xx = self.Phi_yy - self.Phi_vv
+            self.Phi_xx[:, :, k] = self.Phi_yy[:, :, k] - self.Phi_vv[:, :, k]
 
             Phi_vv_inv = np.linalg.inv(self.Phi_vv[:, :, k] + np.eye(self.channels)*1e-6)
 
@@ -159,7 +166,7 @@ class McSppBase(object):
         # eq.17 in [1]
         for k in range(self.half_bin):
             self.Phi_vv[:, :, k] = np.real(self.alpha_tilde[k] * self.Phi_vv[:, :, k] + beta *
-                                           (1 - self.alpha_tilde[k]) * (np.conj(y[k:k+1, :]).transpose() @ y[k:k+1, :]))
+                                           (1 - self.alpha_tilde[k]) * (self.psd_yy[k, :, :]))
 
 
 def main(args):
@@ -170,9 +177,12 @@ def main(args):
     import time
     from scipy.io import wavfile
 
-    filepath = "../../example/test_audio/rec1/"              # [u1,u2,u3,y]
+    filepath = "example/test_audio/p232/"              # [u1,u2,u3,y]
     # filepath = "./test_audio/rec1_mcra_gsc/"     # [y,u1,u2,u3]
     x, sr = load_wav(os.path.abspath(filepath))  # [channel, samples]
+    audio_file = 'example/test_audio/SSB19180462#noise-free-sound-0665#4.70_3.93_3.00_2.46_1.72_218.8051_42.3619_0.3466#-2#3.4485138549309093#0.5211135715489874.wav'
+    wave_data, sr = sf.read(os.path.abspath(audio_file)) # (frames x channels)
+    x = wave_data.transpose()
     sr = 16000
     r = 0.032
     c = 343
@@ -193,10 +203,10 @@ def main(args):
     D = transform.stft(x.transpose())     # [F,T,Ch]
     Y, _ = transform.magphase(D, 2)
     print(Y.shape)
-    pmesh(librosa.power_to_db(Y[:, :, -1]))
-    plt.savefig('pmesh.png')
+    # pmesh(librosa.power_to_db(Y[:, :, -1]))
+    # plt.savefig('pmesh.png')
 
-    mcspp = McSppBase(nfft=512, channels=4)
+    mcspp = McSppBase(nfft=512, channels=channel)
     noise_psd = np.zeros((Y.shape[0], Y.shape[1]))
     p = np.zeros((Y.shape[0], Y.shape[1]))
     Yout = np.zeros((Y.shape[0], Y.shape[1]), dtype=type(Y))
@@ -214,19 +224,40 @@ def main(args):
 
     y = transform.istft(Yout)
 
+    if args.eval:
+        ref_path = os.path.abspath(os.path.join(root_path, 'ref', audio_file))
+        ref, sr = sf.read(ref_path)
+        assert fs == sr
+        if len(ref.shape) >= 2:
+            ref = ref[:, 0]
+
+        nsy = wave_data[:, 0]
+        enh = y[256:]
+        nsy = nsy[:len(enh)]
+        ref = ref[:len(enh)]
+
+        summary = {'ref_pesq': pesq(sr, ref, nsy, 'wb'),
+                   'enh_pesq': pesq(sr, ref, enh, 'wb'),
+                   'ref_stoi': stoi(ref, nsy, sr, extended=False),
+                   'enh_stoi': stoi(ref, enh, sr, extended=False),
+                   'ref_estoi': stoi(ref, nsy, sr, extended=True),
+                   'enh_estoi': stoi(ref, enh, sr, extended=True)}
+        for key in summary.keys():
+            print('{}:{}'.format(key, summary[key]))
+
     # pmesh(librosa.power_to_db(noise_psd))
     # plt.savefig('noise_psd.png')
 
-    pmesh(p)
-    plt.savefig('p.png')
-
-    plt.plot(y)
-    plt.show()
+    # pmesh(p)
+    # plt.savefig('p.png')
+    #
+    # plt.plot(y)
+    # plt.show()
 
     # save audio
     if args.save:
         audio = (y * np.iinfo(np.int16).max).astype(np.int16)
-        wavfile.write('output/output_mcspp91.wav', 16000, audio)
+        wavfile.write('./output_mcsppbase_p232_3.wav', 16000, audio)
 
 
 if __name__ == "__main__":
@@ -234,6 +265,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Neural Feature Extractor")
     parser.add_argument("-l", "--listen", action='store_true', help="set to listen output")  # if set true
     parser.add_argument("-s", "--save", action='store_true', help="set to save output")  # if set true
+    parser.add_argument("-e", "--eval", action='store_true', help="set to save output")  # if set true
 
     args = parser.parse_args()
     main(args)
