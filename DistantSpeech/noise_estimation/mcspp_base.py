@@ -74,6 +74,12 @@ class McSppBase(object):
     def estimate_psd(self, y, alpha):
         pass
 
+    def estimate_noisy_psd(self, y, alpha):
+        # [F,C] *[F,C]->[F,C,C]
+        self.psd_yy = np.einsum('ij,il->ijl', y.conj(), y)
+        # smooth
+        self.Phi_yy = self.alpha * self.Phi_yy + (1 - self.alpha) * np.real(np.transpose(self.psd_yy, (1, 2, 0)))
+
     def compute_posterior_snr(self, y):
         pass
 
@@ -128,10 +134,7 @@ class McSppBase(object):
 
     def estimation(self, y):
 
-        # [F,C] *[F,C]->[F,C,C]
-        self.psd_yy = np.einsum('ij,il->ijl', y.conj(), y)
-        # smooth
-        self.Phi_yy = self.alpha * self.Phi_yy + (1 - self.alpha) * np.real(np.transpose(self.psd_yy, (1, 2, 0)))
+        self.estimate_noisy_psd(y, self.alpha)
 
         for k in range(self.half_bin):
             # if self.frm_cnt < 10:
