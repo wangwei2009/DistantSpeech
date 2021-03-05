@@ -67,6 +67,8 @@ class McSppBase(object):
         self.win = np.array([0.25, 0.5, 0.25])
         self.alpha_s = 0.8
 
+        self.diagonal_eps = np.eye(self.channels)*1e-6
+
         self.mcra = NoiseEstimationMCRA(nfft=self.nfft)
 
         self.frm_cnt = 0
@@ -141,13 +143,15 @@ class McSppBase(object):
             # if self.frm_cnt < 10:
             #     self.Phi_vv[:, :, k] = self.Phi_yy[:, :, k]
 
-            Phi_vv_inv = np.linalg.inv(self.Phi_vv[:, :, k] + np.eye(self.channels)*1e-6)
+            Phi_vv_inv = np.linalg.inv(self.Phi_vv[:, :, k] + self.diagonal_eps)
+            # Phi_vv_inv = self.Phi_vv[:, :, k]
 
             self.xi[k] = np.trace(Phi_vv_inv @ self.Phi_yy[:, :, k]) - self.channels
-            self.xi[k] = np.minimum(np.maximum(self.xi[k], 1e-6), 100.0)
 
-            self.gamma[k] = np.real(y[k:k+1, :] @ Phi_vv_inv @ self.Phi_xx[:, :, k] @ Phi_vv_inv @ np.conj(y[k:k+1, :]).transpose())
-            self.gamma[k] = np.minimum(np.maximum(self.gamma[k], 1e-6), 1000.0)
+            self.gamma[k] = np.real(y[k:k+1, :] @ Phi_vv_inv @ self.Phi_xx[:, :, k] @ Phi_vv_inv @ y[k:k+1, :].conj().T)
+
+        self.xi = np.minimum(np.maximum(self.xi, 1e-6), 100.0)
+        self.gamma = np.minimum(np.maximum(self.gamma, 1e-6), 1000.0)
 
         self.compute_q(y)
         self.compute_p(p_max=0.99, p_min=0.01)
