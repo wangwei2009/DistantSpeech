@@ -8,49 +8,116 @@ import numpy as np
 class Gaussian(object):
     def __init__(self, feature=4):
         self.feature = feature
-        self.mean = np.random.rand(feature,1)
+        self.mean = np.zeros(feature)
         self.var = np.random.rand(feature, feature)
 
-    def get_log_prob(self, x):
+    def get_prob(self, x, diag=1e-6):
+        p = self.get_log_prob(x, diag=diag)
+        # print(p)
+        return np.exp(p)
+        # return p
+
+    def get_log_prob(self, x, diag=1e-6):
+
         assert  x.shape[0] == self.feature
         if len(x.shape) == 1:
-            x = x[x.shape[0], np.newaxis]
-
-        p = -0.5*(self.feature*np.log(2*np.pi) + np.linalg.det(self.var) + ((x-self.mean).transpose() @ np.linalg.inv(self.var) @ (x-self.mean)))
+            x = x[:, np.newaxis]
+        mean = self.mean[:, np.newaxis]
+        var_ = self.var + np.eye((self.feature))*diag
+        p = -0.5*(self.feature*np.log(2*np.pi) + np.linalg.det(var_) + ((x-mean).transpose() @ np.linalg.inv(var_) @ (x-mean)))
 
         return p
 
-    def update(self):
+    def update(self, x):
         pass
 
     def get_param(self):
         pass
 
-    def set_parm(self):
-        pass
+    def set_parm(self, mean, var):
+        self.mean = mean
+        self.var = var
 
 class GaussianMixture(object):
-    def __init__(self, n_features=2, n_components=2) -> None:
+    def __init__(self, n_components=2, n_features=2) -> None:
         self.n_features = n_features
         self.n_components = n_components
-        self.mean_ = np.random.rand(self.n_components, self.n_features)
+        self.mean_ = np.random.rand(n_components, n_features)
         self.covar_ = np.random.rand(n_components, n_features, n_features)
         self.weights_ = np.random.rand(n_components)
 
         self.gmms = [Gaussian(n_features) for n in range(n_components)]
+        for n in range(n_components):
+            # self.gmms.append(Gaussian(n_features))
+            print(self.gmms[n])
 
-    def get_log_prob(self, x):
+    def get_prob(self, x):
         prob = 0.0
-        for n in range(self.n_components):
-            prob += self.gmms[n].get_log_prob(x)
+        for z in range(self.n_components):
+            prob = prob + self.weights_[z] * self.gmms[z].get_prob(x)
+        return prob
+
+    def get_params(self):
+        for z in range(self.n_components):
+            self.mean_[z] = self.gmms[z].mean
+            self.covar_[z, :, :] = self.gmms[z].var
+
+        return self.mean_, self.covar_
+
+    def compute_posterior(self, x):
+        """comppute posterior probability of latent variable given model params and obseration
+
+        Args:
+            x (ndarray): observation, [n_samples, n_features]
+        """
+        assert x.shape[1] == self.n_features
+        n_samples, n_feature = x.shape
+        gamma = np.zeros((n_samples, self.n_components))
+        for n in range(n_samples):
+            for z in range(self.n_components):
+                gamma[n, z] = self.weights_[z] * self.gmms[z].get_prob(x[n,:])/self.get_prob(x[n, :])
+
+        return gamma
+
+    def update_params(self, gamma, x):
+        """update gmms parameter
+
+        Args:
+            gamma (ndarray): posterior probability, [n_samples, n_components]
+            x (ndarray): observation, [n_samples, n_features]
+        """
+        N_z = np.sum(gamma, axis=0)
+        n_samples = x.shape[0]
+        for z in range(self.n_components):
+            self.mean_[z, :] = np.sum(gamma[:, z:z+1] * x, axis=0)/N_z[z]
+            for n in range(n_samples):
+                self.covar_[z, :, :] = self.covar_[z, :, :] + gamma[n, z] * ((x[n:n+1, :] - self.mean_[z:z+1, :]).transpose() @ (x[n:n+1, :] - self.mean_[z:z+1, :]))
+            self.covar_[z, :, :] = self.covar_[z, :, :]/N_z[z]
+            self.weights_[z] = N_z[z]/n_samples
+        self.set_params()
 
 
+    def set_params(self):
+        for z in range(self.n_components):
+            self.gmms[z].set_parm(self.mean_[z, :], self.covar_[z, :, :])
+
+    def update(self, x):
+
+        gamma = self.compute_posterior(x)
+        self.update_params(gamma, x)
+
+        prob = 0.0
+        for n in range(x.shape[0]):
+            prob = self.get_prob(x[n, :])
+
+        return prob
 
 
 def main(args):
-    feature = 1
-    gmm = Gaussian(feature)
-    x = np.ones((feature,1))
+    n_features = 2
+    n_components = 2
+    gmm = GaussianMixture(n_components, n_features)
+    x = np.ones((n_features,1))
     p = gmm.get_log_prob(x)
     print(p)
 
@@ -59,7 +126,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Neural Feature Extractor")
     args = parser.parse_args()
-    main(args)
+    # main(args)
 
     import numpy as np
     import matplotlib.pyplot as plt
@@ -84,6 +151,17 @@ if __name__ == "__main__":
     # fit a Gaussian Mixture Model with two components
     clf = mixture.GaussianMixture(n_components=2, covariance_type='full')
     clf.fit(X_train)
+
+    gmm = GaussianMixture(n_components=2, n_features=2)
+
+    iter = 100
+    for i in range(iter):
+        prob = gmm.update(X_train)
+        # print(prob.shape)
+        print("prob {}: {}".format(i, prob[0]))
+    
+    mean, var = gmm.get_params()
+    print(mean)
 
     # display predicted scores by the model as a contour plot
     x = np.linspace(-20., 30.)
