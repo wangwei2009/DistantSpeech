@@ -40,7 +40,7 @@ class Gaussian(object):
         mean = self.mean[np.newaxis, :]
         for n in range(x.shape[0]):
             xn = x[n:n+1, :]
-            self.var = self.var + ((xn-mean) @ (xn-mean).transpose())
+            self.var = self.var + ((xn-mean).transpose() @ (xn-mean))
         self.var = self.var/n_sample
 
         prob = 0.0
