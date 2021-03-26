@@ -24,12 +24,30 @@ class Gaussian(object):
             x = x[:, np.newaxis]
         mean = self.mean[:, np.newaxis]
         var_ = self.var + np.eye((self.feature))*diag
-        p = -0.5*(self.feature*np.log(2*np.pi) + np.linalg.det(var_) + ((x-mean).transpose() @ np.linalg.inv(var_) @ (x-mean)))
+        p = -0.5*(self.feature*np.log(2*np.pi) + np.log(np.linalg.det(var_)) + ((x-mean).transpose() @ np.linalg.inv(var_) @ (x-mean)))
 
         return p
 
     def update(self, x):
-        pass
+        """[summary]
+
+        Args:
+            x (ndarray): observation, [n_samples, n_features]
+        """
+        n_sample = x.shape[0]
+        self.mean = np.squeeze(np.mean(x, axis=0))
+
+        mean = self.mean[np.newaxis, :]
+        for n in range(x.shape[0]):
+            xn = x[n:n+1, :]
+            self.var = self.var + ((xn-mean) @ (xn-mean).transpose())
+        self.var = self.var/n_sample
+
+        prob = 0.0
+        for n in range(x.shape[0]):
+            prob = prob + self.get_prob(x[n, :])
+
+        return prob
 
     def get_param(self):
         pass
@@ -54,7 +72,7 @@ class GaussianMixture(object):
     def get_prob(self, x):
         prob = 0.0
         for z in range(self.n_components):
-            prob = prob + self.weights_[z] * self.gmms[z].get_prob(x)
+            prob = prob + self.weights_[z] * self.gmms[z].get_log_prob(x)
         return prob
 
     def get_params(self):
@@ -74,8 +92,10 @@ class GaussianMixture(object):
         n_samples, n_feature = x.shape
         gamma = np.zeros((n_samples, self.n_components))
         for n in range(n_samples):
+            prob_den = self.get_prob(x[n, :])
+            # print(prob_den)
             for z in range(self.n_components):
-                gamma[n, z] = self.weights_[z] * self.gmms[z].get_prob(x[n,:])/self.get_prob(x[n, :])
+                gamma[n, z] = self.weights_[z] * self.gmms[z].get_log_prob(x[n,:])/prob_den
 
         return gamma
 
@@ -152,16 +172,22 @@ if __name__ == "__main__":
     clf = mixture.GaussianMixture(n_components=2, covariance_type='full')
     clf.fit(X_train)
 
-    gmm = GaussianMixture(n_components=2, n_features=2)
-
     iter = 100
+    gaussian = Gaussian(feature=2)
     for i in range(iter):
-        prob = gmm.update(X_train)
-        # print(prob.shape)
+        prob = gaussian.update(stretched_gaussian)
         print("prob {}: {}".format(i, prob[0]))
+    print(gaussian.mean)
+
+    # gmm = GaussianMixture(n_components=2, n_features=2)
+
+    # for i in range(iter):
+    #     prob = gmm.update(X_train)
+    #     # print(prob.shape)
+    #     print("prob {}: {}".format(i, prob[0]))
     
-    mean, var = gmm.get_params()
-    print(mean)
+    # mean, var = gmm.get_params()
+    # print(mean)
 
     # display predicted scores by the model as a contour plot
     x = np.linspace(-20., 30.)
