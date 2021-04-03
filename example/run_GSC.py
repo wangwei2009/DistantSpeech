@@ -37,7 +37,7 @@ def main(args):
 
     MicArrayObj = MicArray(arrayType='circular', r=0.032, M=4)
 
-    GSC_1 = GSC(MicArrayObj, frameLen, hop, nfft, c, r, fs)
+    GSC_1 = GSC(MicArrayObj, frameLen, hop, nfft, channels=MicArrayObj.M, c=c, r=r, fs=fs)
 
     if args.live:
         angle = np.array([270, 0]) / 180 * np.pi     # target direction
@@ -80,7 +80,7 @@ def main(args):
         # save audio
         if args.save:
             audio = (yout['data'] * np.iinfo(np.int16).max).astype(np.int16)
-            wavfile.write('output/output_gsc_omlsa_p_Y_pf5.wav', 16000, audio)
+            wavfile.write('output/output_gsc_McMCRA.wav', 16000, audio)
 
         visual(x[0, :], yout['data'])
         plt.title('spectrum')
