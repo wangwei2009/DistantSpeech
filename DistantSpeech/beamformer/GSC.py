@@ -79,16 +79,6 @@ class GSC(beamformer):
         self.mc_mcra = McMcra(nfft=self.nfft, channels=channels)
         self.spp = self.mc_mcra
 
-    def data_ext(self, x, axis=-1):
-        """
-        pad front of data with self.pad_data
-        """
-        left_ext = self.pad_data
-        ext = np.concatenate((left_ext,
-                              x),
-                             axis=axis)
-        return ext
-
     def process(self, x, angle, method=2, retH=False, retWNG=False, retDI=False):
         """
         beamformer process function
@@ -114,19 +104,11 @@ class GSC(beamformer):
         if retH is False:
             beampattern = None
 
-        yout = np.zeros(outputlength, dtype=x.dtype)
-
         alpha_y = 0.8
         alpha_v = 0.9998
 
         mu = 0.01
         rho = 0.998
-
-        # if vad():
-        #     is_speech = 1
-        #     print("speech detected!!!\n")
-        # else:
-        #     is_speech = 0
 
         if (all(angle == self.angle) is False) or (method != self.AlgorithmIndex):
             # update look angle and algorithm
