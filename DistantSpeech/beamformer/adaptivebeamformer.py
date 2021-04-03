@@ -3,6 +3,9 @@ from scipy import signal
 import numpy as np
 from .MicArray import MicArray
 from .beamformer import beamformer
+from DistantSpeech.transform.transform import Transform
+
+
 class adaptivebeamfomer(beamformer):
 
     def __init__(self, MicArray,frameLen=256,hop=None,nfft=None,c=343,r=0.032,fs=16000):
@@ -31,7 +34,7 @@ class adaptivebeamfomer(beamformer):
         self.freq_bin = np.linspace(0, self.half_bin - 1, self.half_bin)
         self.omega = 2 * np.pi * self.freq_bin * self.fs / self.nfft
 
-        self.pad_data = np.zeros([MicArray.M,round(frameLen/2)])
+        self.pad_data = np.zeros([MicArray.M, round(frameLen/2)])
         self.last_output = np.zeros(round(frameLen / 2))
 
         self.H = np.ones([self.M, self.half_bin], dtype=complex)/self.M
@@ -51,33 +54,15 @@ class adaptivebeamfomer(beamformer):
         self.AlgorithmList = ['src', 'DS', 'MVDR', 'TFGSC']
         self.AlgorithmIndex = 0
 
-    def data_ext(self, x, axis=-1):
-        """
-        pad front of data with self.pad_data
-        """
-        left_ext = self.pad_data
-        ext = np.concatenate((left_ext,
-                              x),
-                             axis=axis)
-        return ext
+        self.transformer = Transform(n_fft=self.nfft, hop_length=self.hop, channel=self.M)
 
-    def process(self,x,angle, method=2,retH=False,retWNG = False, retDI = False):
+    def process(self,x,angle, method=2, retH=False, retWNG=False, retDI=False):
         """
         beamformer process function
 
         """
-        x = self.data_ext(x)
-        self.pad_data = x[:, -1 * round(self.nfft / 2):]
-        frameNum = round((len(x[1, :]) - self.overlap) // self.hop)
-        M = len(x[:, 1])
-
-        outputlength = self.frameLen + (frameNum - 1) * self.hop
-        norm = np.zeros(outputlength, dtype=x.dtype)
-
-        # window = windows.hann(self.frameLen, sym=False)
-        window = np.sqrt(windows.hann(self.frameLen, sym=False))
-        norm[:round(self.nfft / 2)] +=window[round(self.nfft / 2):] ** 2
-        win_scale = np.sqrt(1.0/window.sum()**2)
+        X = self.transformer.stft(x.transpose())
+        frameNum = X.shape[1]
 
         tao = -1 * self.r * np.cos(angle[1]) * np.cos(angle[0] - self.gamma) / self.c
 
@@ -92,14 +77,12 @@ class adaptivebeamfomer(beamformer):
         if retH is False:
             beampattern = None
 
-        yout = np.zeros(outputlength, dtype=x.dtype)
-
         alpha_y = 0.8
         alpha_v = 0.9998
 
+        Y = np.ones([self.half_bin, frameNum], dtype=complex)
         for t in range(0, frameNum):
-            xt = x[:, t * self.hop:t * self.hop + self.frameLen] * window
-            Z = np.fft.rfft(xt)#*win_scale
+            Z = X[:, t, :].transpose()
             if (all(angle == self.angle) is False) or (method != self.AlgorithmIndex):
                 # update look angle and algorithm
                 if all(angle == self.angle) is False:
@@ -137,21 +120,12 @@ class adaptivebeamfomer(beamformer):
                     if retDI:
                         DI[k] = self.calcDI(a, self.H[:, k, np.newaxis], self.Fvv[k, :, :])
 
-
             x_fft = np.array(np.conj(self.H)) * Z
-            yf = np.sum(x_fft, axis=0)
-            Cf = np.fft.irfft(yf)#*window.sum()
-            yout[t * self.hop:t * self.hop + self.frameLen] += Cf*window
-            norm[..., t * self.hop:t * self.hop + self.frameLen] += window ** 2
+            Y[:, t] = np.sum(x_fft, axis=0)
 
             if self.frameCount< self.estPos:
                 self.frameCount = self.frameCount + 1
-        norm[..., -1 * round(self.nfft / 2):] += window[:round(self.nfft / 2)] ** 2
-        # yout /= np.where(norm > 1e-10, norm, 1.0)
-
-        yout[:round(self.nfft / 2)] += self.last_output
-        self.last_output = yout[-1 * round(self.nfft / 2):]
-        yout = yout[:-1 * round(self.nfft / 2)]
+        yout = self.transformer.istft(Y)
 
         # calculate beampattern
         if retH:

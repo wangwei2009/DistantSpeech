@@ -4,10 +4,12 @@ import numpy as np
 from .MicArray import MicArray
 from .beamformer import beamformer
 import warnings
+from DistantSpeech.transform.transform import Transform
+
 
 class fixedbeamformer(beamformer):
 
-    def __init__(self, MicArray,frameLen=256,hop=None,nfft=None,c=343,r=0.032,fs=16000):
+    def __init__(self, MicArray, frameLen=256, hop=None, nfft=None, c=343, r=0.032, fs=16000):
 
         beamformer.__init__(self, MicArray)
         self.MicArray = MicArray
@@ -42,35 +44,26 @@ class fixedbeamformer(beamformer):
         self.AlgorithmList = ['src', 'DS', 'MVDR']
         self.AlgorithmIndex = 0
 
-    def data_ext(self, x, axis=-1):
-        """
-        pad front of data with self.pad_data
-        """
-        left_ext = self.pad_data
-        ext = np.concatenate((left_ext,
-                              x),
-                             axis=axis)
-        return ext
+        self.transformer = Transform(n_fft=self.nfft, hop_length=self.hop, channel=self.M)
 
-    def process(self,x,angle,method=1,retH=False,retWNG = False, retDI = False):
+    def process(self, x, angle, method=1, retH=False, retWNG=False, retDI=False):
         """
         fixed beamformer precesing function
+        :param x: input data, [channels, samples]
+        :param angle: incident angle, [-pi, pi]
+        :param method:
+        :param retH:
+        :param retWNG:
+        :param retDI:
+        :return:
+        """
+        """
         method:
         'DS':   delay-and-sum beamformer
         'MVDR': MVDR beamformer under isotropic noise field
         """
-        x = self.data_ext(x)
-        self.pad_data = x[:, -1 * round(self.nfft / 2):]
-        frameNum = round((len(x[1, :]) - self.overlap) // self.hop)
-        M = len(x[:, 1])
-
-        outputlength = self.frameLen + (frameNum - 1) * self.hop
-        norm = np.zeros(outputlength, dtype=x.dtype)
-
-        # window = windows.hamming(self.frameLen, sym=False)
-        window = np.sqrt(windows.hann(self.frameLen, sym=False))
-        norm[:round(self.nfft / 2)] +=window[round(self.nfft / 2):] ** 2
-        win_scale = np.sqrt(1.0/window.sum()**2)
+        X = self.transformer.stft(x.transpose())
+        frameNum = X.shape[1]
 
         tao = -1 * self.r * np.cos(angle[1]) * np.cos(angle[0] - self.gamma) / self.c
 
@@ -85,12 +78,10 @@ class fixedbeamformer(beamformer):
         if retH is False:
             beampattern = None
 
-        yout = np.zeros(outputlength, dtype=x.dtype)
-
         # Fvv = gen_noise_msc(M, self.nfft, self.fs, self.r)
         # H = np.mat(np.ones([self.half_bin, self.M]), dtype=complex).T
-        if (all(angle == self.angle) is False) or (method!= self.AlgorithmIndex) :
-            if method!= self.AlgorithmIndex:
+        if (all(angle == self.angle) is False) or (method != self.AlgorithmIndex):
+            if method != self.AlgorithmIndex:
                 self.AlgorithmIndex = method
             for k in range(0, self.half_bin):
                 a = np.mat(np.exp(-1j * self.omega[k] * tao)).T  # propagation vector
@@ -101,22 +92,14 @@ class fixedbeamformer(beamformer):
                 if retDI:
                     DI[k] = self.calcDI(a, self.H[:, k, np.newaxis],self.Fvv[k,:,:])
 
+        Y = np.ones([self.half_bin, frameNum], dtype=complex)
         for t in range(0, frameNum):
-            xt = x[:, t * self.hop:t * self.hop + self.frameLen] * window
-            Z = np.fft.rfft(xt)*win_scale
+            Z = X[:, t, :].transpose()
 
             x_fft = np.array(np.conj(self.H)) * Z
-            yf = np.sum(x_fft, axis=0)
-            Cf = np.fft.irfft(yf)*window.sum()
-            yout[t * self.hop:t * self.hop + self.frameLen] += Cf*window
-            norm[..., t * self.hop:t * self.hop + self.frameLen] += window ** 2
+            Y[:, t] = np.sum(x_fft, axis=0)
 
-        norm[..., -1*round(self.nfft / 2):] +=window[:round(self.nfft / 2)] ** 2
-        yout /= np.where(norm > 1e-10, norm, 1.0)
-
-        yout[:round(self.nfft/2)] += self.last_output
-        self.last_output = yout[-1*round(self.nfft/2):]
-        yout = yout[:-1*round(self.nfft/2)]
+        yout = self.transformer.istft(Y)
 
         # update angle
         self.angle = angle
@@ -130,7 +113,6 @@ class fixedbeamformer(beamformer):
                 'DI':DI,
                 'beampattern':beampattern
                 }
-
 
     def superDirectiveMVDR(self,x,angle,retH=False,retWNG = False, retDI = False):
         """
