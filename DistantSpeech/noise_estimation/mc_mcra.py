@@ -16,6 +16,7 @@ import os
 
 import numpy as np
 from scipy.signal import convolve
+import soundfile as sf
 
 from DistantSpeech.noise_estimation.mcra import NoiseEstimationMCRA
 from DistantSpeech.noise_estimation.mcspp_base import McSppBase
@@ -180,7 +181,7 @@ class McMcra(McSppBase):
             self.Phi_yy[:, :, k] = self.alpha * self.Phi_yy[:, :, k] + (1 - self.alpha) * \
                                    np.real((np.conj(y[k:k+1, :]).transpose() @ y[k:k+1, :]))
 
-            if self.frm_cnt < 100:
+            if self.frm_cnt < 5:
                 self.Phi_vv[:, :, k] = self.Phi_yy[:, :, k]
 
             self.Phi_xx = self.Phi_yy - self.Phi_vv
@@ -251,7 +252,7 @@ def main(args):
     pmesh(librosa.power_to_db(Y[:, :, -1]))
     plt.savefig('pmesh.png')
 
-    mcspp = McMcra(nfft=512, channels=4)
+    mcspp = McMcra(nfft=512, channels=channel)
     noise_psd = np.zeros((Y.shape[0], Y.shape[1]))
     p = np.zeros((Y.shape[0], Y.shape[1]))
     Yout = np.zeros((Y.shape[0], Y.shape[1]), dtype=type(Y))
@@ -268,6 +269,30 @@ def main(args):
     print(end - start)
 
     y = transform.istft(Yout)
+
+    if args.eval:
+        from pesq import pesq
+        from pystoi.stoi import stoi
+
+        ref_path = './path_to_ref'
+        ref, sr = sf.read(ref_path)
+        assert fs == sr
+        if len(ref.shape) >= 2:
+            ref = ref[:, 0]
+
+        nsy = wave_data[:, 0]
+        enh = y[256:]
+        nsy = nsy[:len(enh)]
+        ref = ref[:len(enh)]
+
+        summary = {'ref_pesq': pesq(sr, ref, nsy, 'wb'),
+                   'enh_pesq': pesq(sr, ref, enh, 'wb'),
+                   'ref_stoi': stoi(ref, nsy, sr, extended=False),
+                   'enh_stoi': stoi(ref, enh, sr, extended=False),
+                   'ref_estoi': stoi(ref, nsy, sr, extended=True),
+                   'enh_estoi': stoi(ref, enh, sr, extended=True)}
+        for key in summary.keys():
+            print('{}:{}'.format(key, summary[key]))
 
     # pmesh(librosa.power_to_db(noise_psd))
     # plt.savefig('noise_psd.png')
@@ -289,6 +314,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Neural Feature Extractor")
     parser.add_argument("-l", "--listen", action='store_true', help="set to listen output")  # if set true
     parser.add_argument("-s", "--save", action='store_true', help="set to save output")  # if set true
+    parser.add_argument("-e", "--eval", action='store_true', help="set to save output")  # if set true
 
     args = parser.parse_args()
     main(args)
