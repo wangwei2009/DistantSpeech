@@ -24,7 +24,7 @@ class NoiseEstimationBase(object):
         self.p = np.zeros(self.half_bin)
         self.alpha_tilde = np.zeros(self.half_bin)
 
-        self.L = 125
+        self.L = 12
 
         self.frm_cnt = 0
 
