@@ -4,6 +4,7 @@ import numpy as np
 from .MicArray import MicArray
 from .beamformer import beamformer
 from DistantSpeech.transform.transform import Transform
+from DistantSpeech.noise_estimation.mcra import NoiseEstimationMCRA
 
 
 class adaptivebeamfomer(beamformer):
@@ -27,7 +28,7 @@ class adaptivebeamfomer(beamformer):
 
         self.frameCount = 0
         self.calc = 0
-        self.estPos = 200
+        self.estPos = None                   # set None to use vad
 
         self.Rvv = np.zeros((self.half_bin, self.M, self.M), dtype=complex)
         self.Rvv_inv = np.zeros((self.half_bin, self.M, self.M), dtype=complex)
@@ -37,6 +38,9 @@ class adaptivebeamfomer(beamformer):
         self.AlgorithmIndex = 0
 
         self.transformer = Transform(n_fft=self.nfft, hop_length=self.hop, channel=self.M)
+        self.mcra = NoiseEstimationMCRA(nfft=self.nfft)
+
+        self.update_noise_psd_flag = 0
 
     def process(self,x,angle, method=2, retH=False, retWNG=False, retDI=False):
         """
@@ -75,38 +79,42 @@ class adaptivebeamfomer(beamformer):
                 self.frameCount = 0
                 self.calc = 0
 
+            self.mcra.estimation(np.abs(Z[0, :] * np.conj(Z[0, :])))
+
             for k in range(0, self.half_bin):
                 a = np.mat(np.exp(-1j * self.omega[k] * tao)).T  # propagation vector
                 # recursive average Ryy
                 self.Ryy[k, :, :] = alpha_y * self.Ryy[k, :, :] + (1 - alpha_y) * np.dot(Z[:, k, np.newaxis],
                                                                                  Z[:, k, np.newaxis].conj().transpose())
-                if self.frameCount<self.estPos:
-                    # recursive average Rvv
+                Diagonal = 1e-6
+                if self.estPos is not None:                      # use start frame
+                    if self.frameCount<self.estPos:
+                        self.update_noise_psd_flag = 1
+                        self.frameCount = self.frameCount + 1
+                elif self.mcra.p[k] < 0.4:                        # use mcra-based vad
+                    self.update_noise_psd_flag = 1
+                if self.update_noise_psd_flag:
                     self.Rvv[k, :, :] = alpha_v * self.Rvv[k, :, :] + (1 - alpha_v) * np.dot(Z[:, k,np.newaxis],Z[:, k,np.newaxis].conj().transpose())
-                if self.frameCount == 200 and self.calc == 0:
-                    if k == self.half_bin-1:
-                        self.calc = 1
+                    self.update_noise_psd_flag = 0
+
                     # print("calculating MVDR weights...\n")
-                    Diagonal = 1e-6
                     Rvv_k = (self.Rvv[k, :, :]) + Diagonal * np.eye(self.M)  # Diagonal loading
                     self.Rvv_inv[k,:,:] = np.linalg.inv(Rvv_k)
-                    self.H[:, k, np.newaxis] = self.getweights(a,
-                                                               self.AlgorithmList[method],
-                                                               Rvv=self.Rvv[k, :, :],
-                                                               Rvv_inv=self.Rvv_inv[k,:,:],
-                                                               Ryy=self.Ryy[k, :, :],
-                                                               Diagonal=Diagonal)
+                self.H[:, k, np.newaxis] = self.getweights(a,
+                                                            self.AlgorithmList[method],
+                                                            Rvv=self.Rvv[k, :, :],
+                                                            Rvv_inv=self.Rvv_inv[k,:,:],
+                                                            Ryy=self.Ryy[k, :, :],
+                                                            Diagonal=Diagonal)
 
-                    if retWNG:
-                        WNG[k] = self.calcWNG(a, self.H[:, k, np.newaxis])
-                    if retDI:
-                        DI[k] = self.calcDI(a, self.H[:, k, np.newaxis], self.Fvv[k, :, :])
+                if retWNG:
+                    WNG[k] = self.calcWNG(a, self.H[:, k, np.newaxis])
+                if retDI:
+                    DI[k] = self.calcDI(a, self.H[:, k, np.newaxis], self.Fvv[k, :, :])
 
             x_fft = np.array(np.conj(self.H)) * Z
             Y[:, t] = np.sum(x_fft, axis=0)
 
-            if self.frameCount< self.estPos:
-                self.frameCount = self.frameCount + 1
         yout = self.transformer.istft(Y)
 
         # calculate beampattern
