@@ -10,8 +10,10 @@ class beamformer(MicArray):
 
     def __init__(self, mic=MicArray, frame_len=256, hop=None, nfft=None, c=343, r=0.032, fs=16000):
         MicArray.__init__(self, arrayType=mic.arrayType, r=mic.r, M=mic.M)
+        self.MicArray = mic
         self.M = mic.M
 
+        self.frameLen = frame_len
         if hop is None:
             self.hop = int(frame_len//2)
         else:

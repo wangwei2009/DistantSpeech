@@ -10,22 +10,7 @@ class adaptivebeamfomer(beamformer):
 
     def __init__(self, MicArray,frameLen=256,hop=None,nfft=None,c=343,r=0.032,fs=16000):
 
-        beamformer.__init__(self, MicArray)
-        self.MicArray = MicArray
-        self.frameLen = frameLen
-        if hop is None:
-            self.hop = int(frameLen//2)
-        else:
-            self.hop = int(hop)
-        self.overlap = frameLen - hop
-        if nfft is None:
-            self.nfft = int(frameLen)
-        else:
-            self.nfft = int(nfft)
-        self.c = c
-        self.r = r
-        self.fs = fs
-        self.half_bin = round(nfft / 2 + 1)
+        beamformer.__init__(self, MicArray, frame_len=frameLen, hop=hop, nfft=nfft, c=c, fs=fs)
         self.M = 4
         self.angle = np.array([197, 0]) / 180 * np.pi
         self.gamma = MicArray.gamma
@@ -33,9 +18,6 @@ class adaptivebeamfomer(beamformer):
         self.win_scale = np.sqrt(1.0/self.window.sum()**2)
         self.freq_bin = np.linspace(0, self.half_bin - 1, self.half_bin)
         self.omega = 2 * np.pi * self.freq_bin * self.fs / self.nfft
-
-        self.pad_data = np.zeros([MicArray.M, round(frameLen/2)])
-        self.last_output = np.zeros(round(frameLen / 2))
 
         self.H = np.ones([self.M, self.half_bin], dtype=complex)/self.M
 
