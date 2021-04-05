@@ -37,12 +37,12 @@ def main(args):
     r = 0.032
     fs = sr
 
-    start = time.clock()
+    start = time.process_time()
 
     MicArrayObj = MicArray(arrayType='circular', r=0.032, M=4)
     angle = np.array([197, 0]) / 180 * np.pi
 
-    fixedbeamformerObj = fixedbeamformer(MicArrayObj,frameLen,hop,nfft,c,r,fs)
+    fixedbeamformerObj = fixedbeamformer(MicArrayObj,frameLen,hop,nfft,c,fs)
     # """
     # fixed beamformer precesing function
     # method:
@@ -52,7 +52,7 @@ def main(args):
     # """
     yout = fixedbeamformerObj.process(x,angle,method=2,retH=True,retWNG=True,retDI=True)
 
-    end = time.clock()
+    end = time.process_time()
     print(end-start)
 
     # listen processed result
