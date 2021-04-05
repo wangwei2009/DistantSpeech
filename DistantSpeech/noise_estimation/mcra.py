@@ -58,7 +58,7 @@ def main(args):
     from matplotlib import pyplot as plt
     import librosa
 
-    filepath = "../../example/test_audio/rec1/"
+    filepath = "example/test_audio/rec1/"
     x, sr = load_wav(os.path.abspath(filepath))      # [channel,samples]
     sr = 16000
     r = 0.032
