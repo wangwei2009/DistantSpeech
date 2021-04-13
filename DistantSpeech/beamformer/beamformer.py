@@ -3,13 +3,12 @@ from .MicArray import MicArray
 import warnings
 
 
-class beamformer(MicArray):
+class beamformer(object):
     """
     beamformer base class
     """
 
     def __init__(self, mic=MicArray, frame_len=256, hop=None, nfft=None, c=343, r=0.032, fs=16000):
-        MicArray.__init__(self, arrayType=mic.arrayType, r=mic.r, M=mic.M)
         self.MicArray = mic
         self.M = mic.M
 
@@ -36,6 +35,9 @@ class beamformer(MicArray):
             self.Ryy[:, :, k] = np.eye(self.M, dtype=np.complex)
             self.Rss[:, :, k] = np.eye(self.M, dtype=np.complex)
             self.Rnn[:, :, k] = np.eye(self.M, dtype=np.complex)
+
+        # generate diffuse model
+        self.Fvv = gen_noise_msc(mic=self.MicArray, M=self.M, r=self.r, nfft=self.nfft, fs=self.fs, c=self.c)
 
     def get_steering_vector(self):
         pass
@@ -126,3 +128,34 @@ class beamformer(MicArray):
                 beamout[az, k] = np.abs(np.squeeze(H[:, k, np.newaxis].conj().T @ a))
 
         return 10 * np.log10(beamout)
+
+
+def gen_noise_msc(mic=MicArray, M=4, r=0.032, nfft=256, fs=16000, c=340):
+    half_bin = round(nfft / 2 + 1)
+    Fvv = np.zeros((half_bin, M, M))
+    f = np.linspace(0, fs / 2, half_bin)
+    f[0] = 1e-6
+    k_optimal = 1
+
+    if mic.arrayType == 'circular':
+        for i in range(0, M):
+            for j in range(0, M):
+                if i == j:
+                    Fvv[:, i, j] = np.ones(half_bin)
+                else:
+                    mic_rad = np.abs(mic.gamma[i] - mic.gamma[j])
+                    dij = np.sqrt(r ** 2 + r ** 2 - 2 * r * r * np.cos(mic_rad))
+                    Fvv[:, i, j] = np.sin(2 * np.pi * f * dij / c) / (2 * np.pi * f * dij / c)
+                    Fvv[0, i, j] = 0.998
+    if mic.arrayType == 'linear':
+        for i in range(0, M):
+            for j in range(0, M):
+                if i == j:
+                    Fvv[:, i, j] = np.ones(half_bin)
+                else:
+                    dij = np.abs(i - j) * r
+                    Fvv[:, i, j] = np.sin(2 * np.pi * f * dij / c) / (2 * np.pi * f * dij / c)
+                    Fvv[0, i, j] = 0.998
+    if mic.arrayType == 'arbitrary':
+        warnings.warn("diffuse noise field for arbitrary not implemented yet!")
+    return Fvv
