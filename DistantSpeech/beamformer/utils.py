@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from matplotlib import cm
 import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
+from scipy.io import wavfile
 
 
 def spec(x):
@@ -142,3 +143,20 @@ def filter(x):
     for i in range(0,M):
         x[i,:] = signal.filtfilt(h, 1, x[i,:])
     return x
+
+
+def load_audio(filename: str) -> np.array:
+    _, audio_data = wavfile.read(filename)
+    if audio_data.dtype==np.int16:
+        audio_data = audio_data.astype(np.float32) / float(np.iinfo(audio_data.dtype).max)
+
+    return audio_data
+
+
+def save_audio(filename: str, audio: np.ndarray, fs=16000):
+    """Save loaded audio to file using the configured audio parameters"""
+    if not filename.endswith(".wav"):
+        filename = filename + ".wav"
+    audio = (audio * np.iinfo(np.int16).max).astype(np.int16)
+
+    wavfile.write(filename, fs, audio)   # audio should be (Nsamples, Nchannels)
