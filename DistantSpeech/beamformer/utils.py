@@ -7,6 +7,7 @@ from matplotlib import cm
 import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
 from scipy.io import wavfile
+import platform
 
 
 def spec(x):
@@ -16,29 +17,29 @@ def spec(x):
     return S_db
 
 
-def visual(x,y=None,sr=16000):
-
+def visual(x, y=None, sr=16000):
     if y is not None:
         S_db1 = spec(x)
         S_db2 = spec(y)
 
         plt.figure()
         plt.subplot(2, 1, 1)
-        librosa.display.specshow(S_db1, y_axis='linear', x_axis='time',sr=sr)
+        librosa.display.specshow(S_db1, y_axis='linear', x_axis='time', sr=sr)
         plt.colorbar()
 
         plt.subplot(2, 1, 2)
-        librosa.display.specshow(S_db2, y_axis='linear', x_axis='time',sr=sr)
+        librosa.display.specshow(S_db2, y_axis='linear', x_axis='time', sr=sr)
         plt.colorbar()
 
         plt.show()
     else:
         S_db = spec(x)
         plt.figure()
-        librosa.display.specshow(S_db, y_axis='linear', x_axis='time',sr=sr)
+        librosa.display.specshow(S_db, y_axis='linear', x_axis='time', sr=sr)
         plt.colorbar()
-        plt.show()  
-        
+        plt.show()
+
+
 def mesh(array2D):
     """
     plot 2D array
@@ -53,6 +54,7 @@ def mesh(array2D):
     surf = ax.plot_surface(X, Y, array2D, cmap=cm.coolwarm, linewidth=0, antialiased=False)
     fig1.colorbar(surf, shrink=0.5, aspect=5)
     # plt.show()
+
 
 def pmesh(array2D):
     """
@@ -69,7 +71,7 @@ def pmesh(array2D):
     plt.show()
 
 
-def find_files(filepath,fileType:str):
+def find_files(filepath, fileType: str):
     """
     find all wav file in a directory
 
@@ -90,7 +92,7 @@ def load_wav(filepath):
 
     """
     import librosa
-    filename = find_files(filepath,".wav")
+    filename = find_files(filepath, ".wav")
     wavdata_list = []
     is_channel_1 = 1
     min_len = 0
@@ -108,7 +110,7 @@ def load_wav(filepath):
     wavdata = np.zeros([M, min_len])
     for i in range(0, M):
         wavdata[i, :] = wavdata_list[i][:min_len]
-    return wavdata, sr     # return M*L ndarray
+    return wavdata, sr  # return M*L ndarray
 
 
 def load_pcm(filepath):
@@ -118,17 +120,18 @@ def load_pcm(filepath):
 
     """
     import numpy as np
-    filename = find_files(filepath,".pcm")
+    filename = find_files(filepath, ".pcm")
     wavdata_list = []
     for names in filename:
-        x1 = np.memmap(filepath + names, dtype='h', mode='r')/32768.0
+        x1 = np.memmap(filepath + names, dtype='h', mode='r') / 32768.0
         wavdata_list.append(x1)
     L = len(wavdata_list[0])
     M = len(filename)
-    wavdata = np.zeros([M,L])
-    for i in range(0,M):
-        wavdata[i,:] = wavdata_list[i]
-    return wavdata     # return M*L ndarray
+    wavdata = np.zeros([M, L])
+    for i in range(0, M):
+        wavdata[i, :] = wavdata_list[i]
+    return wavdata  # return M*L ndarray
+
 
 def filter(x):
     """
@@ -140,14 +143,14 @@ def filter(x):
     size = x.shape
     M = size[0]
     L = size[1]
-    for i in range(0,M):
-        x[i,:] = signal.filtfilt(h, 1, x[i,:])
+    for i in range(0, M):
+        x[i, :] = signal.filtfilt(h, 1, x[i, :])
     return x
 
 
 def load_audio(filename: str) -> np.array:
     _, audio_data = wavfile.read(filename)
-    if audio_data.dtype==np.int16:
+    if audio_data.dtype == np.int16:
         audio_data = audio_data.astype(np.float32) / float(np.iinfo(audio_data.dtype).max)
 
     return audio_data
@@ -159,4 +162,20 @@ def save_audio(filename: str, audio: np.ndarray, fs=16000):
         filename = filename + ".wav"
     audio = (audio * np.iinfo(np.int16).max).astype(np.int16)
 
-    wavfile.write(filename, fs, audio)   # audio should be (Nsamples, Nchannels)
+    wavfile.write(filename, fs, audio)  # audio should be (Nsamples, Nchannels)
+
+
+def common_path(path_os_spec, linux_prefix='/home/wangwei', windows_prefix='Z:'):
+    if platform.system() == 'Windows':
+        index = path_os_spec.find(linux_prefix)
+        if index != -1:
+            path = windows_prefix + path_os_spec[len(linux_prefix):]
+        else:
+            path = path_os_spec
+    elif platform.system() == 'Linux':
+        index = path_os_spec.find(windows_prefix)
+        if index != -1:
+            path = linux_prefix + path_os_spec[len(windows_prefix):]
+        else:
+            path = path_os_spec
+    return path
