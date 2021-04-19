@@ -74,7 +74,7 @@ def main(args):
     src = load_audio('cleanspeech.wav')
     print(src.shape)
     rir = load_audio('rir.wav')
-    rir = rir[200:]
+    rir = rir[199:]
     rir = rir[:512, np.newaxis]
 
     # src = awgn(src, 30)
@@ -103,6 +103,8 @@ def main(args):
     block_len = filter_len
     block_num = len(src) // block_len
 
+    eps = 1e-6
+
     for n in tqdm(range((len(src)))):
         if n < filter_len:
             continue
@@ -116,11 +118,11 @@ def main(args):
         est_err_blms[n] = np.sum(np.abs(rir - w_blms[:len(rir)]) ** 2)
         est_err_fdaf[n] = np.sum(np.abs(rir - w_fdaf[:len(rir)]) ** 2)
 
-    plt.plot(10 * np.log(est_err_lms / np.sum(np.abs(rir[:, 0])**2) + 1e-12))
-    plt.plot(10 * np.log(est_err_nlms / np.sum(np.abs(rir[:, 0])**2)) + 1e-12)
-    plt.plot(10 * np.log(est_err_blms / np.sum(np.abs(rir[:, 0]) ** 2)) + 1e-12)
-    plt.plot(10 * np.log(est_err_fdaf / np.sum(np.abs(rir[:, 0]) ** 2)) + 1e-12)
-    plt.legend(['lms', 'nlms', 'block-lms', 'fd-lms'], loc='upper right')
+    plt.plot(10 * np.log10(est_err_lms / np.sum(np.abs(rir[:, 0])**2) + eps))
+    plt.plot(10 * np.log10(est_err_nlms / np.sum(np.abs(rir[:, 0])**2)) + eps)
+    plt.plot(10 * np.log10(est_err_blms / np.sum(np.abs(rir[:, 0]) ** 2)) + eps)
+    plt.plot(10 * np.log10(est_err_fdaf / np.sum(np.abs(rir[:, 0]) ** 2)) + eps)
+    plt.legend(['lms', 'nlms', 'block-nlms', 'fd-lms'], loc='upper right')
     plt.ylabel("$\||\hat{w}-w\||_2$")
     plt.title('weight estimation error vs step')
     plt.show()
