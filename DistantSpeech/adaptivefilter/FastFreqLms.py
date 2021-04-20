@@ -10,7 +10,7 @@ from DistantSpeech.beamformer.utils import load_audio
 from scipy.signal import convolve as conv
 from matplotlib import pyplot as plt
 from tqdm import tqdm
-from DistantSpeech.adaptivefilter.BaseFilter import BaseFilter
+from DistantSpeech.adaptivefilter.BaseFilter import BaseFilter, awgn
 from DistantSpeech.adaptivefilter.BlockLMS import BlockLms
 from numpy.fft import rfft as fft
 from numpy.fft import irfft as ifft
@@ -73,6 +73,7 @@ def main(args):
     # src = load_audio('cleanspeech_aishell3.wav')
     src = load_audio('cleanspeech.wav')
     print(src.shape)
+    src = np.random.randn(len(src))             # white noise, best for adaptive filter
     rir = load_audio('rir.wav')
     rir = rir[199:]
     rir = rir[:512, np.newaxis]
@@ -83,45 +84,51 @@ def main(args):
     SNR = 20
     data_clean = conv(src, rir[:, 0])
     data = data_clean[:len(src)]
-    # data = awgn(data, SNR)
+    data = awgn(data, SNR)
 
     filter_len = 512
     w = np.zeros((filter_len, 1))
 
+    block_len = filter_len
+    block_num = len(src) // block_len
+
     fdaf = FastFreqLms(filter_len=filter_len, mu=0.1)
 
-    lms = BaseFilter(filter_len=filter_len, mu=0.01, normalization=False)
+    lms = BaseFilter(filter_len=filter_len, mu=1e-4, normalization=False)
     nlms = BaseFilter(filter_len=filter_len, mu=0.1)
     #
-    blms = BlockLms(block_len=2, filter_len=filter_len, mu=0.1)
+    blms = BlockLms(block_len=block_len, filter_len=filter_len, mu=0.1)
     #
     est_err_lms = np.zeros(np.size(data))
     est_err_nlms = np.zeros(np.size(data))
     est_err_blms = np.zeros(np.size(data))
-    est_err_fdaf = np.zeros(np.size(data))
-
-    block_len = filter_len
-    block_num = len(src) // block_len
+    est_err_fdaf = np.zeros(len(data) - filter_len)
 
     eps = 1e-6
 
+    w_fdaf = np.zeros((filter_len, 1))
+
     for n in tqdm(range((len(src)))):
-        if n < filter_len:
-            continue
+
         _, w_lms = lms.update(src[n], data[n])
         _, w_nlms = nlms.update(src[n], data[n])
         _, w_blms = blms.update(src[n], data[n])
-        if np.mod(n, block_len) == 0:
-            _, w_fdaf = fdaf.update(src[n-filter_len:n], data[n-filter_len:n])
+
         est_err_lms[n] = np.sum(np.abs(rir - w_lms[:len(rir)])**2)
         est_err_nlms[n] = np.sum(np.abs(rir - w_nlms[:len(rir)])**2)
         est_err_blms[n] = np.sum(np.abs(rir - w_blms[:len(rir)]) ** 2)
-        est_err_fdaf[n] = np.sum(np.abs(rir - w_fdaf[:len(rir)]) ** 2)
 
-    plt.plot(10 * np.log10(est_err_lms / np.sum(np.abs(rir[:, 0])**2) + eps))
-    plt.plot(10 * np.log10(est_err_nlms / np.sum(np.abs(rir[:, 0])**2)) + eps)
-    plt.plot(10 * np.log10(est_err_blms / np.sum(np.abs(rir[:, 0]) ** 2)) + eps)
-    plt.plot(10 * np.log10(est_err_fdaf / np.sum(np.abs(rir[:, 0]) ** 2)) + eps)
+        if n < filter_len:
+            continue
+        if np.mod(n, block_len) == 0:
+            _, w_fdaf = fdaf.update(src[n-filter_len:n], data[n-filter_len:n])
+        est_err_fdaf[n - filter_len] = np.sum(np.abs(rir - w_fdaf[:len(rir)]) ** 2)
+
+    rir_norm = np.sum(np.abs(rir[:, 0])**2)
+    plt.plot(10 * np.log10(est_err_lms / rir_norm + eps))
+    plt.plot(10 * np.log10(est_err_nlms / rir_norm + eps))
+    plt.plot(10 * np.log10(est_err_blms / rir_norm + eps))
+    plt.plot(10 * np.log10(est_err_fdaf / rir_norm + eps))
     plt.legend(['lms', 'nlms', 'block-nlms', 'fd-lms'], loc='upper right')
     plt.ylabel("$\||\hat{w}-w\||_2$")
     plt.title('weight estimation error vs step')

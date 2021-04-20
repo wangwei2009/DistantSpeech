@@ -10,7 +10,7 @@ from DistantSpeech.beamformer.utils import load_audio
 from scipy.signal import convolve as conv
 from matplotlib import pyplot as plt
 from tqdm import tqdm
-from DistantSpeech.adaptivefilter.BaseFilter import BaseFilter
+from DistantSpeech.adaptivefilter.BaseFilter import BaseFilter, awgn
 
 
 class BlockLms(BaseFilter):
@@ -47,6 +47,10 @@ class BlockLms(BaseFilter):
 
             self.w = self.update_coef(grad)
 
+            self.counter = 0   # reset counter
+
+        self.counter += 1
+
         return en, self.w
 
 
@@ -54,6 +58,7 @@ def main(args):
     # src = load_audio('cleanspeech_aishell3.wav')
     src = load_audio('cleanspeech.wav')
     print(src.shape)
+    src = np.random.randn(len(src))
     rir = load_audio('rir.wav')
     rir = rir[200:]
     rir = rir[:256, np.newaxis]
@@ -64,15 +69,15 @@ def main(args):
     SNR = 20
     data_clean = conv(src, rir[:, 0])
     data = data_clean[:len(src)]
-    # data = awgn(data, SNR)
+    data = awgn(data, SNR)
 
     filter_len = 256
     w = np.zeros((filter_len, 1))
 
-    lms = BaseFilter(filter_len=filter_len, mu=0.01, normalization=False)
-    nlms = BaseFilter(filter_len=filter_len, mu=0.01)
+    lms = BaseFilter(filter_len=filter_len, mu=1e-4, normalization=False)
+    nlms = BaseFilter(filter_len=filter_len, mu=0.1)
 
-    blms = BlockLms(block_len=2, filter_len=filter_len, mu=0.01)
+    blms = BlockLms(block_len=256, filter_len=filter_len, mu=0.1)
 
     est_err_lms = np.zeros(np.size(data))
     est_err_nlms = np.zeros(np.size(data))
@@ -89,7 +94,7 @@ def main(args):
     plt.plot(10 * np.log(est_err_lms / np.sum(np.abs(rir[:, 0])**2) + 1e-12))
     plt.plot(10 * np.log(est_err_nlms / np.sum(np.abs(rir[:, 0])**2)) + 1e-12)
     plt.plot(10 * np.log(est_err_blms / np.sum(np.abs(rir[:, 0]) ** 2)) + 1e-12)
-    plt.legend(['lms', 'nlms', 'block-lms'], loc='upper right')
+    plt.legend(['lms', 'nlms', 'block-nlms'], loc='upper right')
     plt.ylabel("$\||\hat{w}-w\||_2$")
     plt.title('weight estimation error vs step')
     plt.show()
