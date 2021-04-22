@@ -41,6 +41,22 @@ class FDGSC(beamformer):
         for m in self.M:
             self.bm.append(FastFreqLms(filter_len=frameLen))
 
+    def fixed_beamformer(self):
+        pass
+
+    def bm(self):
+        pass
+
+    def aic(self, z):
+        """
+        :param z:
+        :return:
+        """
+        pass
+
+    def process(self, x):
+        pass
+
 
 
     #     self.M = channels
