@@ -112,13 +112,13 @@ class ArraySim(object):
         self.R = linear_3d_array(self.center_loc, 3, 0, 0.05)
 
         # set max_order to a low value for a quick (but less accurate) RIR
-        self.room = pra.Room.from_corners(self.corners, fs=fs, max_order=8, materials=pra.Material(0.2, 0.15),
+        self.room = pra.Room.from_corners(self.corners, fs=fs, max_order=3, materials=pra.Material(0.7, 0.15),
                                           ray_tracing=True,
                                           air_absorption=True)
-        self.room.extrude(self.height, materials=pra.Material(0.2, 0.15))
+        self.room.extrude(self.height, materials=pra.Material(0.7, 0.15))
 
         # Set the ray tracing parameters
-        self.room.set_ray_tracing(receiver_radius=0.5, n_rays=10000, energy_thres=1e-5)
+        self.room.set_ray_tracing(receiver_radius=0.1, n_rays=10000, energy_thres=1e-5)
 
         # add 3-microphone array
         self.room.add_microphone(self.R)
@@ -143,7 +143,7 @@ class ArraySim(object):
                        source_distance=1.0,
                        interf_angle=30,
                        interf_distance=1.0,
-                       snr=0, sir=15):
+                       snr=30, sir=15):
         if interference is not None:
             interf = interference
         else:
@@ -165,6 +165,13 @@ class ArraySim(object):
 
         # compute image sources
         self.room.image_source_model()
+
+        self.room.plot_rir()
+        t60 = pra.experimental.measure_rt60(self.room.rir[0][0], fs=self.room.fs)
+        print(f"The RT60 is {t60 * 1000:.0f} ms")
+        # fig = plt.gcf()
+        # fig.set_size_inches(20, 10)
+        # plt.show()
 
         self.room.simulate()
         # print(room.mic_array.signals.shape)
