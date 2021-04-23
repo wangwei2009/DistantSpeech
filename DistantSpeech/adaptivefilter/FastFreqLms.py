@@ -1,5 +1,7 @@
 """
 % frequency-domain fast block-lms algorithm using overlap-save method
+% refer to
+%
 %
 %
 % Created by Wang wei
@@ -17,33 +19,48 @@ from numpy.fft import irfft as ifft
 
 
 class FastFreqLms(BaseFilter):
-    def __init__(self, filter_len=128, mu=0.01, constrain=True):
+    def __init__(self, filter_len=128, mu=0.01, constrain=True, n_channels=1):
         BaseFilter.__init__(self, filter_len=filter_len, mu=mu)
-        self.input_buffer = np.zeros((filter_len * 2, 1))               # to store [old, new]
+        self.n_channels = n_channels
+        self.input_buffer = np.zeros((filter_len * 2, n_channels))               # to store [old, new]
 
         self.n_fft = self.filter_len * 2
 
-        self.w_pad = np.zeros((self.filter_len * 2, 1))
+        self.w_pad = np.zeros((self.filter_len * 2, n_channels))
 
         self.W = np.fft.rfft(self.w_pad, axis=0)
 
-        self.P = np.zeros((self.n_fft // 2 + 1, 1))
+        self.P = np.zeros((self.n_fft // 2 + 1, n_channels))
         self.alpha = 0.9
 
         self.constrain = constrain
 
     def update_input(self, xt_vec: np.array):
+        """
+        update input data buffer
+        :param xt_vec: the signal need to be filtered, (n_samples,) or (n_samples, n_chs)
+        :return:
+        """
         if xt_vec.ndim == 1:
             xt_vec = xt_vec[:, np.newaxis]
+        assert self.n_channels == xt_vec.shape[1]
         self.input_buffer[:self.filter_len, :] = self.input_buffer[self.filter_len:, :]   # old
         self.input_buffer[self.filter_len:, :] = xt_vec                                   # new
 
     def update(self, x_n_vec, d_n_vec):
+        """
+        fast frequency lms update function
+        :param x_n_vec: the signal need to be filtered, (n_samples,) or (n_samples, n_chs)
+        :param d_n_vec: expected signal, (n_samples,) or (n_samples, 1)
+        :return: error , filter weights
+        """
         self.update_input(x_n_vec)
         X = np.fft.rfft(self.input_buffer, n=self.n_fft, axis=0)
         self.P = self.alpha * self.P + (1 - self.alpha) * np.real((X.conj() * X))
 
         y = np.fft.irfft(X * self.W, axis=0)[-self.filter_len:, :]
+
+        y = np.sum(y, axis=1, keepdims=True)
 
         if d_n_vec.ndim == 1:
             d_n_vec = d_n_vec[:, np.newaxis]
