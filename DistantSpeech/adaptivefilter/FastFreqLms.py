@@ -6,7 +6,7 @@
 """
 import numpy as np
 import argparse
-from DistantSpeech.beamformer.utils import load_audio
+from DistantSpeech.beamformer.utils import load_audio, save_audio
 from scipy.signal import convolve as conv
 from matplotlib import pyplot as plt
 from tqdm import tqdm
@@ -69,6 +69,61 @@ class FastFreqLms(BaseFilter):
         return e, self.w
 
 
+def test_aic():
+
+    # # src = load_audio('cleanspeech_aishell3.wav')
+    # src = load_audio('cleanspeech.wav')
+    # print(src.shape)
+    # # src = np.random.randn(len(src))             # white noise, best for adaptive filter
+    # rir = load_audio('rir.wav')
+    # rir = rir[199:]
+    # rir = rir[:512, np.newaxis]
+    #
+    # # src = awgn(src, 30)
+    # print(src.shape)
+    #
+    # SNR = 20
+    # data_clean = conv(src, rir[:, 0])
+    # data = data_clean[:len(src)]
+    #
+    # x = src
+    # d = data
+
+    data = load_audio('../beamformer/wav/x_cleanspeech.wav')
+    x = data[:, 0]
+    # x = load_audio('cleanspeech.wav')
+    d = data[:, 1]
+
+    filter_len = 1024
+    w = np.zeros((filter_len, 1))
+
+    block_len = filter_len
+    block_num = len(x) // block_len
+
+    fdaf = FastFreqLms(filter_len=filter_len, mu=0.1)
+
+    est_err_fdaf = np.zeros(len(x) - filter_len)
+
+    eps = 1e-6
+
+    w_fdaf = np.zeros((filter_len, 1))
+
+    output = np.zeros(len(x))
+
+    for n in tqdm(range((len(x)))):
+        if n < filter_len:
+            continue
+        if np.mod(n, block_len) == 0:
+            output_n, w_fdaf = fdaf.update(x[n-filter_len:n], d[n-filter_len:n])
+            output[n - filter_len:n] = np.squeeze(output_n)
+
+    # save_audio('wav/aic_out.wav', output)
+    plt.plot(output)
+    plt.show()
+
+    return output
+
+
 def main(args):
     # src = load_audio('cleanspeech_aishell3.wav')
     src = load_audio('cleanspeech.wav')
@@ -108,6 +163,8 @@ def main(args):
 
     w_fdaf = np.zeros((filter_len, 1))
 
+    output = np.zeros((len(data),1))
+
     for n in tqdm(range((len(src)))):
 
         _, w_lms = lms.update(src[n], data[n])
@@ -121,7 +178,7 @@ def main(args):
         if n < filter_len:
             continue
         if np.mod(n, block_len) == 0:
-            _, w_fdaf = fdaf.update(src[n-filter_len:n], data[n-filter_len:n])
+            output[n-filter_len:n], w_fdaf = fdaf.update(src[n-filter_len:n], data[n-filter_len:n])
         est_err_fdaf[n - filter_len] = np.sum(np.abs(rir - w_fdaf[:len(rir)]) ** 2)
 
     rir_norm = np.sum(np.abs(rir[:, 0])**2)
@@ -141,4 +198,5 @@ if __name__ == "__main__":
     parser.add_argument("-s", "--save", action='store_true', help="set to save output")  # if set true
 
     args = parser.parse_args()
-    main(args)
+    # main(args)
+    test_aic()
