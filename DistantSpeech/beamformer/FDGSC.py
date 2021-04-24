@@ -1,3 +1,6 @@
+"""
+overlap-save frequency domain GSC
+"""
 import argparse
 import numpy as np
 from scipy.signal import windows
@@ -35,7 +38,7 @@ class DelayObj(object):
             x = x[np.newaxis, :]
         data_len = x.shape[1]
 
-        output = self.buffer[:, :data_len]
+        output = self.buffer[:, :data_len].copy()
         self.buffer[:, :self.n_delay] = self.buffer[:, -self.n_delay:]
         self.buffer[:, -data_len:] = x
 
@@ -68,7 +71,7 @@ class FDGSC(beamformer):
 
         self.aic_filter = FastFreqLms(filter_len=frameLen, n_channels=self.M - 1)
 
-        self.delay_obj = DelayObj(frameLen, 256)
+        self.delay_obj = DelayObj(self.frameLen, 8)
 
     def fixed_delay(self):
         pass
@@ -111,135 +114,32 @@ class FDGSC(beamformer):
 
         # adaptive block matrix path
         bm_output = np.zeros((x.shape[1], self.M - 1))
-        frameNum = int((x.shape[1] - self.overlap) / self.hop)
+        fix_output = np.zeros((x.shape[1],))
+
+        # overlaps-save approach, no need to use hop_size
+        frameNum = int((x.shape[1]) / self.frameLen)
 
         for n in range(frameNum):
-            x_n = x[:, n * self.hop:n * self.hop + self.frameLen]
+            x_n = x[:, n * self.frameLen:(n + 1) * self.frameLen]
 
             # fixed beamformer path
             fixed_output = self.fixed_beamformer(x_n)
 
             # fix delay
-            fixed_output_delayed = self.delay_obj.delay(fixed_output)
-            #
-            # # adaptive block matrix
-            # for m in range(self.M - 1):
-            #     output_n, _ = self.bm[0].update(x_n[m, :], x_n[m + 1, :])
-            #     bm_output[n * self.hop:n * self.hop + self.frameLen, m] = np.squeeze(output_n)
-            #
-            # output_n, _ = self.aic_filter.update(bm_output[n * self.hop:n * self.hop + self.frameLen, :], fixed_output)
-            #
-            # output[n * self.hop:n * self.hop + self.frameLen] = np.squeeze(output_n)
-            output[n * self.hop:n * self.hop + self.frameLen] = fixed_output_delayed
+            fixed_output = self.delay_obj.delay(fixed_output)
+
+            # adaptive block matrix
+            for m in range(self.M - 1):
+                bm_output_n, _ = self.bm[0].update(x_n[m, :], x_n[m + 1, :])
+                bm_output[n * self.frameLen:(n + 1) * self.frameLen, m] = np.squeeze(bm_output_n)
+
+            # AIC block
+            output_n, _ = self.aic_filter.update(bm_output[n * self.frameLen:(n + 1) * self.frameLen, :],
+                                                 fixed_output.T)
+
+            output[n * self.frameLen:(n + 1) * self.frameLen] = np.squeeze(bm_output_n)
 
         return output
-
-        pass
-
-        X = self.transformer.stft(x.transpose())
-        frameNum = X.shape[1]
-
-        tao = -1 * self.r * np.cos(angle[1]) * np.cos(angle[0] - self.gamma) / self.c
-
-        if retWNG:
-            WNG = np.ones(self.half_bin)
-        else:
-            WNG = None
-        if retDI:
-            DI = np.ones(self.half_bin)
-        else:
-            DI = None
-        if retH is False:
-            beampattern = None
-
-        # Fvv = gen_noise_msc(M, self.nfft, self.fs, self.r)
-        # H = np.mat(np.ones([self.half_bin, self.M]), dtype=complex).T
-        if (all(angle == self.angle) is False) or (method != self.AlgorithmIndex):
-            if method != self.AlgorithmIndex:
-                self.AlgorithmIndex = method
-            for k in range(0, self.half_bin):
-                a = np.mat(np.exp(-1j * self.omega[k] * tao)).T  # propagation vector
-                self.H[:, k, np.newaxis] = self.getweights(a, self.AlgorithmList[method], self.Fvv[k, :, :],
-                                                           Diagonal=1e-1)
-
-                if retWNG:
-                    WNG[k] = self.calcWNG(a, self.H[:, k, np.newaxis])
-                if retDI:
-                    DI[k] = self.calcDI(a, self.H[:, k, np.newaxis], self.Fvv[k, :, :])
-
-        Y = np.ones([self.half_bin, frameNum], dtype=complex)
-        for t in range(0, frameNum):
-            Z = X[:, t, :].transpose()
-
-            x_fft = np.array(np.conj(self.H)) * Z
-            Y[:, t] = np.sum(x_fft, axis=0)
-
-        yout = self.transformer.istft(Y)
-
-        # update angle
-        self.angle = angle
-
-        # calculate beampattern
-        if retH:
-            beampattern = self.beampattern(self.omega, self.H)
-
-        return {'data': yout,
-                'WNG': WNG,
-                'DI': DI,
-                'beampattern': beampattern
-                }
-        pass
-
-        #     self.M = channels
-        #     self.angle = np.array([197, 0]) / 180 * np.pi
-        #     self.gamma = MicArray.gamma
-        #     self.window = windows.hann(self.frameLen, sym=False)
-        #     self.win_scale = np.sqrt(1.0 / self.window.sum() ** 2)
-        #     self.freq_bin = np.linspace(0, self.half_bin - 1, self.half_bin)
-        #     self.omega = 2 * np.pi * self.freq_bin * self.fs / self.nfft
-        #
-        #     self.window = np.sqrt(windows.hann(self.frameLen, sym=False))
-        #
-        #     self.transformer = Transform(n_fft=self.nfft, hop_length=self.hop, channel=self.M)
-        #
-        #     self.pad_data = np.zeros([MicArray.M, round(frameLen / 2)])
-        #     self.last_output = np.zeros(round(frameLen / 2))
-        #
-        #     self.H = np.ones([self.M, self.half_bin], dtype=complex) / self.M
-        #
-        #     self.angle = np.array([0, 0]) / 180 * np.pi
-        #
-        #     self.method = 'MVDR'
-        #
-        #     self.frameCount = 0
-        #     self.calc = 1
-        #     self.estPos = 200
-        #
-        #     self.Rvv = np.zeros((self.half_bin, self.M, self.M), dtype=complex)
-        #     self.Rvv_inv = np.zeros((self.half_bin, self.M, self.M), dtype=complex)
-        #     self.Ryy = np.zeros((self.half_bin, self.M, self.M), dtype=complex)
-        #
-        #     self.AlgorithmList = ['src', 'DS', 'MVDR', 'TFGSC']
-        #     self.AlgorithmIndex = 0
-        #
-        #     # blocking matrix
-        #     self.BM = np.zeros((self.M, self.M - 1, self.half_bin), dtype=complex)
-        #     # noise reference
-        #     self.U = np.zeros((self.M - 1, self.half_bin), dtype=complex)
-        #     # fixed beamformer weights for upper path
-        #     self.W = np.zeros((self.M, self.half_bin), dtype=complex)
-        #     # MNC weights for lower path
-        #     self.G = np.zeros((self.M - 1, self.half_bin), dtype=complex)
-        #     self.Pest = np.ones(self.half_bin)
-        #
-        #     self.Yfbf = np.zeros((self.half_bin), dtype=complex)
-        #
-        #     self.mcra = NoiseEstimationMCRA(nfft=self.nfft)
-        #     self.omlsa_multi = NsOmlsaMulti(nfft=self.nfft, cal_weights=True, M=channels)
-        #     self.mcspp = McSppBase(nfft=self.nfft, channels=channels)
-        #     self.mc_mcra = McMcra(nfft=self.nfft, channels=channels)
-        #     self.spp = self.mc_mcra
-        #
 
 
 def main(args):
@@ -270,18 +170,12 @@ def main(args):
     start = time()
 
     fdgsc = FDGSC(MicArrayObj, frameLen, hop, nfft, c, fs)
-    # """
-    # fixed beamformer precesing function
-    # method:
-    # 'DS':   delay-and-sum beamformer
-    # 'MVDR': MVDR beamformer under isotropic noise field
-    #
-    # """
+
     yout = fdgsc.process(x)
 
     print(yout.shape)
 
-    audiowrite('wav/yout.wav', yout)
+    audiowrite('wav/out_bm.wav', yout)
 
     end = time()
     print(end - start)
@@ -290,24 +184,29 @@ def main(args):
 
     return
 
-    # listen processed result
-    if (args.listen):
-        sd.default.channels = 1
-        sd.play(yout['data'], fs)
-        sd.wait()
 
-    # view beampattern
-    print(yout['beampattern'].shape)
-    mesh(yout['beampattern'])
-    plt.title('beampattern')
-    pmesh(yout['beampattern'])
+def test_delay():
+    from matplotlib import pyplot as plt
+    t = np.arange(8000) / 1000.0
+    f = 1000
+    fs = 1000
+    x = np.sin(2 * np.pi * f / fs * t)
 
-    # save audio
-    if (args.save):
-        wavfile.write('output/output_fixedbeamformer.wav', 16000, yout['data'])
+    delay = 128
+    buffer_len = 512
+    delay_obj = DelayObj(buffer_len, delay)
 
-    visual(x[0, :], yout['data'])
-    plt.title('spectrum')
+    n_frame = int(len(x) / buffer_len)
+
+    output = np.zeros(len(x))
+
+    for n in range(n_frame):
+        output[n * buffer_len:(n + 1) * buffer_len] = delay_obj.delay(x[n * buffer_len:(n + 1) * buffer_len])
+
+    plt.figure()
+    plt.plot(x)
+    plt.plot(np.squeeze(output))
+    plt.show()
 
 
 if __name__ == "__main__":
@@ -317,3 +216,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     main(args)
+    # test_delay()
