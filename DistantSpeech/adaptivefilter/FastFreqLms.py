@@ -87,43 +87,22 @@ class FastFreqLms(BaseFilter):
 
 
 def test_aic():
+    """
+    estimate ATF or RTF
+    :return:
+    """
 
-    # # src = load_audio('cleanspeech_aishell3.wav')
-    # src = load_audio('cleanspeech.wav')
-    # print(src.shape)
-    # # src = np.random.randn(len(src))             # white noise, best for adaptive filter
-    # rir = load_audio('rir.wav')
-    # rir = rir[199:]
-    # rir = rir[:512, np.newaxis]
-    #
-    # # src = awgn(src, 30)
-    # print(src.shape)
-    #
-    # SNR = 20
-    # data_clean = conv(src, rir[:, 0])
-    # data = data_clean[:len(src)]
-    #
-    # x = src
-    # d = data
-
-    data = load_audio('../beamformer/wav/x_cleanspeech.wav')
-    x = data[:, 0]
-    # x = load_audio('cleanspeech.wav')
+    data = load_audio('wav/cleanspeech_reverb_ch3_rt60_110.wav')
+    x = data[:, 0]                        # to estimate rtf
+    # x = load_audio('cleanspeech.wav')     # to estimate atf
     d = data[:, 1]
 
     filter_len = 1024
-    w = np.zeros((filter_len, 1))
 
     block_len = filter_len
     block_num = len(x) // block_len
 
     fdaf = FastFreqLms(filter_len=filter_len, mu=0.1)
-
-    est_err_fdaf = np.zeros(len(x) - filter_len)
-
-    eps = 1e-6
-
-    w_fdaf = np.zeros((filter_len, 1))
 
     output = np.zeros(len(x))
 
