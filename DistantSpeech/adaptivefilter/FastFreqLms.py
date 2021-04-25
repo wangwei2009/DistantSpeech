@@ -18,6 +18,30 @@ from numpy.fft import rfft as fft
 from numpy.fft import irfft as ifft
 
 
+class DelayObj(object):
+    def __init__(self, buffer_size, delay, channel=1):
+        self.buffer_szie = buffer_size
+        self.n_delay = delay
+
+        self.buffer = np.zeros((channel, buffer_size + delay))
+
+    def delay(self, x):
+        """
+        delay x for self.delay point
+        :param x: (n_samples,) or (n_chs, n_samples)
+        :return:
+        """
+        if len(x.shape) == 1:
+            x = x[np.newaxis, :]
+        data_len = x.shape[1]
+
+        self.buffer[:, -data_len:] = x
+        output = self.buffer[:, :data_len].copy()
+        self.buffer[:, :self.n_delay] = self.buffer[:, -self.n_delay:]
+
+        return output
+
+
 class FastFreqLms(BaseFilter):
     def __init__(self, filter_len=128, mu=0.01, constrain=True, n_channels=1, alpha=0.9):
         BaseFilter.__init__(self, filter_len=filter_len, mu=mu)
@@ -95,9 +119,17 @@ def test_aic():
     data = load_audio('wav/cleanspeech_reverb_ch3_rt60_110.wav')
     x = data[:, 0]                        # to estimate rtf
     # x = load_audio('cleanspeech.wav')     # to estimate atf
+    x = np.mean(data, axis=1)
     d = data[:, 1]
 
     filter_len = 1024
+
+    delay = 8
+    delay_obj = DelayObj(len(d), delay)
+
+    d = delay_obj.delay(d)
+    d = np.squeeze(d)
+
 
     block_len = filter_len
     block_num = len(x) // block_len
