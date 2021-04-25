@@ -1,5 +1,9 @@
 """
 overlap-save frequency domain GSC
+refer to
+    Efficient frequency-domain realization of robust generalized, sidelobe cancellers
+Author:
+    Wang Wei
 """
 import argparse
 import numpy as np
@@ -38,9 +42,9 @@ class DelayObj(object):
             x = x[np.newaxis, :]
         data_len = x.shape[1]
 
+        self.buffer[:, -data_len:] = x
         output = self.buffer[:, :data_len].copy()
         self.buffer[:, :self.n_delay] = self.buffer[:, -self.n_delay:]
-        self.buffer[:, -data_len:] = x
 
         return output
 
@@ -66,12 +70,14 @@ class FDGSC(beamformer):
         self.transformer = Transform(n_fft=self.nfft, hop_length=self.hop, channel=self.M)
 
         self.bm = []
-        for m in range(self.M-1):
+        for m in range(self.M):
             self.bm.append(FastFreqLms(filter_len=frameLen, mu=0.1, alpha=0.8))
 
-        self.aic_filter = FastFreqLms(filter_len=frameLen, n_channels=self.M - 1, mu=0.1, alpha=0.8)
+        self.aic_filter = FastFreqLms(filter_len=frameLen, n_channels=self.M, mu=0.1, alpha=0.8)
 
-        self.delay_obj = DelayObj(self.frameLen, 8)
+        self.delay_obj = DelayObj(self.frameLen, 16)
+
+        self.delay_obj_bm = DelayObj(self.frameLen, 8, channel=self.M)
 
     def fixed_delay(self):
         pass
@@ -113,7 +119,7 @@ class FDGSC(beamformer):
         output = np.zeros(x.shape[1])
 
         # adaptive block matrix path
-        bm_output = np.zeros((x.shape[1], self.M - 1))
+        bm_output = np.zeros((x.shape[1], self.M))
         fix_output = np.zeros((x.shape[1],))
 
         # overlaps-save approach, no need to use hop_size
@@ -125,13 +131,15 @@ class FDGSC(beamformer):
             # fixed beamformer path
             fixed_output = self.fixed_beamformer(x_n)
 
-            # fix delay
-            fixed_output = self.delay_obj.delay(fixed_output)
+            lower_path_delayed = self.delay_obj_bm.delay(x_n)
 
             # adaptive block matrix
-            for m in range(self.M - 1):
-                bm_output_n, _ = self.bm[m].update(x_n[m, :], x_n[m + 1, :])
+            for m in range(self.M):
+                bm_output_n, _ = self.bm[m].update(fixed_output.T, lower_path_delayed[m, :])
                 bm_output[n * self.frameLen:(n + 1) * self.frameLen, m] = np.squeeze(bm_output_n)
+
+            # fix delay
+            fixed_output = self.delay_obj.delay(fixed_output)
 
             # AIC block
             output_n, _ = self.aic_filter.update(bm_output[n * self.frameLen:(n + 1) * self.frameLen, :],
@@ -175,7 +183,7 @@ def main(args):
 
     print(yout.shape)
 
-    audiowrite('wav/out_bm.wav', yout)
+    # audiowrite('wav/out_aic.wav', yout)
 
     end = time()
     print(end - start)
