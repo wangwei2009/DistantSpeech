@@ -66,10 +66,10 @@ class FDGSC(beamformer):
         self.transformer = Transform(n_fft=self.nfft, hop_length=self.hop, channel=self.M)
 
         self.bm = []
-        for m in range(self.M):
-            self.bm.append(FastFreqLms(filter_len=frameLen))
+        for m in range(self.M-1):
+            self.bm.append(FastFreqLms(filter_len=frameLen, mu=0.1, alpha=0.8))
 
-        self.aic_filter = FastFreqLms(filter_len=frameLen, n_channels=self.M - 1)
+        self.aic_filter = FastFreqLms(filter_len=frameLen, n_channels=self.M - 1, mu=0.1, alpha=0.8)
 
         self.delay_obj = DelayObj(self.frameLen, 8)
 
@@ -130,14 +130,14 @@ class FDGSC(beamformer):
 
             # adaptive block matrix
             for m in range(self.M - 1):
-                bm_output_n, _ = self.bm[0].update(x_n[m, :], x_n[m + 1, :])
+                bm_output_n, _ = self.bm[m].update(x_n[m, :], x_n[m + 1, :])
                 bm_output[n * self.frameLen:(n + 1) * self.frameLen, m] = np.squeeze(bm_output_n)
 
             # AIC block
             output_n, _ = self.aic_filter.update(bm_output[n * self.frameLen:(n + 1) * self.frameLen, :],
                                                  fixed_output.T)
 
-            output[n * self.frameLen:(n + 1) * self.frameLen] = np.squeeze(bm_output_n)
+            output[n * self.frameLen:(n + 1) * self.frameLen] = np.squeeze(output_n)
 
         return output
 

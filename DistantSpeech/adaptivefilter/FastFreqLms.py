@@ -19,7 +19,7 @@ from numpy.fft import irfft as ifft
 
 
 class FastFreqLms(BaseFilter):
-    def __init__(self, filter_len=128, mu=0.01, constrain=True, n_channels=1):
+    def __init__(self, filter_len=128, mu=0.01, constrain=True, n_channels=1, alpha=0.9):
         BaseFilter.__init__(self, filter_len=filter_len, mu=mu)
         self.n_channels = n_channels
         self.input_buffer = np.zeros((filter_len * 2, n_channels))               # to store [old, new]
@@ -31,7 +31,7 @@ class FastFreqLms(BaseFilter):
         self.W = np.fft.rfft(self.w_pad, axis=0)
 
         self.P = np.zeros((self.n_fft // 2 + 1, n_channels))
-        self.alpha = 0.9
+        self.alpha = alpha
 
         self.constrain = constrain
 
@@ -102,7 +102,7 @@ def test_aic():
     block_len = filter_len
     block_num = len(x) // block_len
 
-    fdaf = FastFreqLms(filter_len=filter_len, mu=0.1)
+    fdaf = FastFreqLms(filter_len=filter_len, mu=0.1, alpha=0.8)
 
     output = np.zeros(len(x))
 
