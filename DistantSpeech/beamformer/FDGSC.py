@@ -123,6 +123,9 @@ class FDGSC(beamformer):
         for n in range(frameNum):
             x_n = x[:, n * self.frameLen:(n + 1) * self.frameLen]
 
+            bm_update = True if n < int(550000 / self.frameLen) else False
+            aic_update = True if n > int(550000 / self.frameLen) else False
+
             # fixed beamformer path
             fixed_output = self.fixed_beamformer(x_n)
 
@@ -130,7 +133,7 @@ class FDGSC(beamformer):
 
             # adaptive block matrix
             for m in range(self.M):
-                bm_output_n, _ = self.bm[m].update(fixed_output.T, lower_path_delayed[m, :])
+                bm_output_n, _ = self.bm[m].update(fixed_output.T, lower_path_delayed[m, :], update=bm_update)
                 bm_output[n * self.frameLen:(n + 1) * self.frameLen, m] = np.squeeze(bm_output_n)
 
             # fix delay
@@ -138,7 +141,7 @@ class FDGSC(beamformer):
 
             # AIC block
             output_n, _ = self.aic_filter.update(bm_output[n * self.frameLen:(n + 1) * self.frameLen, :],
-                                                 fixed_output.T)
+                                                 fixed_output.T, update=aic_update)
 
             output[n * self.frameLen:(n + 1) * self.frameLen] = np.squeeze(output_n)
 
