@@ -6,23 +6,18 @@ Author:
     Wang Wei
 """
 import argparse
-import numpy as np
-from scipy.signal import windows
 from time import time
 
-from DistantSpeech.noise_estimation.mcra import NoiseEstimationMCRA
-from DistantSpeech.noise_estimation.mcspp_base import McSppBase
-from DistantSpeech.noise_estimation.omlsa_multi import NsOmlsaMulti
-from DistantSpeech.noise_estimation.mc_mcra import McMcra
-from DistantSpeech.transform.transform import Transform
-from DistantSpeech.beamformer.beamformer import beamformer
-from DistantSpeech.beamformer.ArraySim import generate_audio
-from DistantSpeech.beamformer.utils import load_audio as audioread
-from DistantSpeech.beamformer.utils import save_audio as audiowrite
-from DistantSpeech.beamformer.ArraySim import ArraySim
+import numpy as np
+from scipy.signal import windows
+
 from DistantSpeech.adaptivefilter.FastFreqLms import FastFreqLms
 from DistantSpeech.beamformer.MicArray import MicArray
+from DistantSpeech.beamformer.beamformer import beamformer
+from DistantSpeech.beamformer.utils import load_audio as audioread
+from DistantSpeech.beamformer.utils import save_audio as audiowrite
 from DistantSpeech.beamformer.utils import visual
+from DistantSpeech.transform.transform import Transform
 
 
 class DelayObj(object):
@@ -151,12 +146,8 @@ class FDGSC(beamformer):
 
 
 def main(args):
-    signal = audioread("../adaptivefilter/cleanspeech.wav")
-    # fs = 16000
-    # mic_array = ArraySim(array_type='linear', spacing=0.05)
-    # array_data = mic_array.generate_audio(signal)
-    # print(array_data.shape)
-    # audiowrite('wav/array_data2.wav', array_data.transpose(), fs)
+    target = audioread("wav/target.wav")
+    interf = audioread("wav/interf.wav")
 
     frameLen = 1024
     hop = frameLen / 2
@@ -171,9 +162,9 @@ def main(args):
     MicArrayObj = MicArray(arrayType='linear', r=0.05, M=3)
     angle = np.array([197, 0]) / 180 * np.pi
 
-    x = MicArrayObj.array_sim.generate_audio(signal)
+    x = MicArrayObj.array_sim.generate_audio(target, interference=interf, snr=0)
     print(x.shape)
-    audiowrite('wav/x_cleanspeech.wav', x.transpose())
+    audiowrite('wav/target_90_interf_30.wav', x.transpose())
 
     start = time()
 
