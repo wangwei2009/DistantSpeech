@@ -6,16 +6,18 @@
 %
 % Created by Wang wei
 """
-import numpy as np
 import argparse
-from DistantSpeech.beamformer.utils import load_audio, save_audio
-from scipy.signal import convolve as conv
+
+import numpy as np
 from matplotlib import pyplot as plt
+from numpy.fft import irfft as ifft
+from numpy.fft import rfft as fft
+from scipy.signal import convolve as conv
 from tqdm import tqdm
+
 from DistantSpeech.adaptivefilter.BaseFilter import BaseFilter, awgn
 from DistantSpeech.adaptivefilter.BlockLMS import BlockLms
-from numpy.fft import rfft as fft
-from numpy.fft import irfft as ifft
+from DistantSpeech.beamformer.utils import load_audio
 
 
 class DelayObj(object):
@@ -71,7 +73,7 @@ class FastFreqLms(BaseFilter):
         self.input_buffer[:self.filter_len, :] = self.input_buffer[self.filter_len:, :]   # old
         self.input_buffer[self.filter_len:, :] = xt_vec                                   # new
 
-    def update(self, x_n_vec, d_n_vec):
+    def update(self, x_n_vec, d_n_vec, update=True):
         """
         fast frequency lms update function
         :param x_n_vec: the signal need to be filtered, (n_samples,) or (n_samples, n_chs)
@@ -102,7 +104,8 @@ class FastFreqLms(BaseFilter):
             grad_1[-self.filter_len:] = 0
             grad = fft(grad_1, n=self.n_fft, axis=0)
 
-        self.W = self.W + 2 * self.mu * grad  # update filter weights
+        if update:
+            self.W = self.W + 2 * self.mu * grad  # update filter weights
 
         w_est = ifft(self.W, n=self.n_fft, axis=0)
         self.w = w_est[:self.filter_len, :]
