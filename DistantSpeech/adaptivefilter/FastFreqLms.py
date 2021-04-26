@@ -56,7 +56,7 @@ class FastFreqLms(BaseFilter):
 
         self.W = np.fft.rfft(self.w_pad, axis=0)
 
-        self.P = np.zeros((self.n_fft // 2 + 1, n_channels))
+        self.P = np.zeros((self.n_fft // 2 + 1, 1))
         self.alpha = alpha
 
         self.constrain = constrain
@@ -82,7 +82,7 @@ class FastFreqLms(BaseFilter):
         """
         self.update_input(x_n_vec)
         X = np.fft.rfft(self.input_buffer, n=self.n_fft, axis=0)
-        self.P = self.alpha * self.P + (1 - self.alpha) * np.real((X.conj() * X))
+        self.P = self.alpha * self.P + (1 - self.alpha) * np.sum(np.real((X.conj() * X)), axis=1, keepdims=True)
 
         y = np.fft.irfft(X * self.W, axis=0)[-self.filter_len:, :]
 
