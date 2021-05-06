@@ -43,6 +43,29 @@ class DelayObj(object):
 
         return output
 
+class DelayBuffer(object):
+    def __init__(self, data_len, delay):
+        self.data_len = data_len
+        self.n_delay = delay
+
+        self.buffer = np.zeros((delay, data_len))
+
+    def delay(self, x_vec):
+        """
+        delay x for self.delay point
+        :param x: (n_samples,)
+        :return:
+        """
+        x_vec = np.squeeze(x_vec)
+
+        assert len(x_vec) == self.data_len
+
+        self.buffer[-1, :] = x_vec
+        output = self.buffer[0, :].copy()
+        self.buffer[:-1, :] = self.buffer[1:, :]
+
+        return output
+
 
 class DualMicKws(beamformer):
     def __init__(self, MicArray, frameLen=256, hop=None, nfft=None, channels=4, c=343, r=0.032, fs=16000):
@@ -70,12 +93,7 @@ class DualMicKws(beamformer):
         for m in range(self.M):
             self.bm.append(FastFreqLms(filter_len=frameLen, mu=0.1, alpha=0.8))
 
-        self.aic_filter = FastFreqLms(
-            filter_len=frameLen, n_channels=self.M, mu=0.1, alpha=0.8)
-
-        self.delay_obj = DelayObj(self.frameLen, 16)
-
-        self.delay_obj_bm = DelayObj(self.frameLen, 8, channel=self.M)
+        self.delay_obj = DelayBuffer(self.frameLen, 16)
 
     def fixed_delay(self):
         pass
@@ -116,6 +134,8 @@ class DualMicKws(beamformer):
 
         output = np.zeros(x.shape[1])
 
+        cleaner_output = np.zeros(x.shape[1])
+
         # adaptive block matrix path
         bm_output = np.zeros((x.shape[1], self.M))
         fix_output = np.zeros((x.shape[1],))
@@ -136,17 +156,13 @@ class DualMicKws(beamformer):
 
             # adaptive block matrix
             for m in range(self.M):
-                bm_output_n, _ = self.bm[m].update(
+                bm_output_n, weights = self.bm[m].update(
                     fixed_output.T, lower_path_delayed[m, :], update=bm_update)
                 bm_output[n * self.frameLen:(n + 1) *
                           self.frameLen, m] = np.squeeze(bm_output_n)
 
             # fix delay
             fixed_output = self.delay_obj.delay(fixed_output)
-
-            # AIC block
-            output_n, _ = self.aic_filter.update(bm_output[n * self.frameLen:(n + 1) * self.frameLen, :],
-                                                 fixed_output.T, update=aic_update)
 
             output[n * self.frameLen:(n + 1) *
                    self.frameLen] = np.squeeze(bm_output[n * self.frameLen:(n + 1) *
