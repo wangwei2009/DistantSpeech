@@ -90,8 +90,10 @@ class DualMicKws(beamformer):
             n_fft=self.nfft, hop_length=self.hop, channel=self.M)
 
         self.bm = []
+        self.cleaner_filter = []
         for m in range(self.M):
             self.bm.append(FastFreqLms(filter_len=frameLen, mu=0.1, alpha=0.8))
+            self.cleaner_filter.append(FastFreqLms(filter_len=frameLen, mu=0.1, alpha=0.8))
 
         self.delay_obj = DelayBuffer(self.frameLen, 16)
 
@@ -158,8 +160,12 @@ class DualMicKws(beamformer):
             for m in range(self.M):
                 bm_output_n, weights = self.bm[m].update(
                     fixed_output.T, lower_path_delayed[m, :], update=bm_update)
+                weights_delayed = self.delay_obj.delay(weights)
+                self.cleaner_filter[m].w[:, 0] = weights_delayed
+                cleaner_output_n, _ = self.cleaner_filter[m].update(
+                    fixed_output.T, lower_path_delayed[m, :], update=False)
                 bm_output[n * self.frameLen:(n + 1) *
-                          self.frameLen, m] = np.squeeze(bm_output_n)
+                          self.frameLen, m] = np.squeeze(cleaner_output_n)
 
             # fix delay
             fixed_output = self.delay_obj.delay(fixed_output)
