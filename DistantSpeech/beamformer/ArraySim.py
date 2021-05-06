@@ -109,7 +109,7 @@ class ArraySim(object):
         self.center_loc[1] = (self.corners[1, 0] + self.corners[1, 2]) / 2
         self.center_loc[2] = 0.5
 
-        self.R = linear_3d_array(self.center_loc, 3, 0, 0.05)
+        self.R = linear_3d_array(self.center_loc, M, 0, spacing)
 
         # set max_order to a low value for a quick (but less accurate) RIR
         self.room = pra.Room.from_corners(self.corners, fs=fs, max_order=3, materials=pra.Material(0.7, 0.15),
