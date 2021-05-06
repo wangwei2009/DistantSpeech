@@ -12,9 +12,12 @@ local_examples/
 
 venv/
 .vscode/
+*_pycache_*
 
 .venv/
 *.pk
 */output/*
 */out/*
 .pytest_cache/*
+output*
+test_audio/
