@@ -61,6 +61,13 @@ class FastFreqLms(BaseFilter):
 
         self.constrain = constrain
 
+    def set_weights(self, weights):
+        weights = np.squeeze(weights)
+        assert len(weights) == self.filter_len
+        self.w[:, 0] = np.squeeze(weights)
+        self.w_pad[:self.filter_len, 0] = self.w[:, 0]
+        self.W = np.fft.rfft(self.w_pad, axis=0)
+
     def update_input(self, xt_vec: np.array):
         """
         update input data buffer
