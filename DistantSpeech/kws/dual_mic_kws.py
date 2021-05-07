@@ -16,6 +16,7 @@ from DistantSpeech.beamformer.MicArray import MicArray
 from DistantSpeech.beamformer.beamformer import beamformer
 from DistantSpeech.beamformer.utils import load_audio as audioread
 from DistantSpeech.beamformer.utils import save_audio as audiowrite
+from DistantSpeech.beamformer.utils import load_wav
 from DistantSpeech.beamformer.utils import visual
 from DistantSpeech.transform.transform import Transform
 
@@ -46,9 +47,9 @@ class DelayObj(object):
 class DelayBuffer(object):
     def __init__(self, data_len, delay):
         self.data_len = data_len
-        self.n_delay = delay
+        self.n_delay = delay + 1
 
-        self.buffer = np.zeros((delay, data_len))
+        self.buffer = np.zeros((self.n_delay, data_len))
 
     def delay(self, x_vec):
         """
@@ -95,7 +96,9 @@ class DualMicKws(beamformer):
             self.bm.append(FastFreqLms(filter_len=frameLen, mu=0.1, alpha=0.8))
             self.cleaner_filter.append(FastFreqLms(filter_len=frameLen, mu=0.1, alpha=0.8))
 
-        self.delay_obj = DelayBuffer(self.frameLen, 16)
+        self.delay_obj = DelayBuffer(self.frameLen, 64)
+
+        self.delay_obj_bm = DelayObj(self.frameLen, 8, channel=self.M)
 
     def fixed_delay(self):
         pass
@@ -157,11 +160,12 @@ class DualMicKws(beamformer):
             lower_path_delayed = self.delay_obj_bm.delay(x_n)
 
             # adaptive block matrix
-            for m in range(self.M):
+            for m in range(self.M-1):
                 bm_output_n, weights = self.bm[m].update(
                     fixed_output.T, lower_path_delayed[m, :], update=bm_update)
                 weights_delayed = self.delay_obj.delay(weights)
-                self.cleaner_filter[m].w[:, 0] = weights_delayed
+
+                self.cleaner_filter[m].set_weights(weights_delayed)
                 cleaner_output_n, _ = self.cleaner_filter[m].update(
                     fixed_output.T, lower_path_delayed[m, :], update=False)
                 bm_output[n * self.frameLen:(n + 1) *
@@ -178,8 +182,7 @@ class DualMicKws(beamformer):
 
 
 def main(args):
-    target = audioread("samples/audio_samples/target.wav")
-    interf = audioread("samples/audio_samples/interf.wav")
+    target = audioread("samples/audio_samples/cleanspeech_aishell3.wav")
 
     frameLen = 1024
     hop = frameLen / 2
@@ -194,11 +197,25 @@ def main(args):
     MicArrayObj = MicArray(arrayType='linear', r=0.04, M=2)
     angle = np.array([197, 0]) / 180 * np.pi
 
-    x = MicArrayObj.array_sim.generate_audio(
-        target, interference=interf, snr=0)
-    print(x.shape)
-    audiowrite('DistantSpeech/kws/wav/target_90_interf_30.wav', x.transpose())
+    if args.real:
+        x, _ = load_wav('samples/kws_samples/diy/3')
+    else:
+        x = MicArrayObj.array_sim.generate_audio(
+            target, snr=60)
+        print(x.shape)
+        kws_data = audioread('samples/kws_samples/himia.wav')
 
+        MicArrayKwsObj = MicArray(arrayType='linear', r=0.04, M=2)
+        kws_data_reverb = MicArrayKwsObj.array_sim.generate_audio(
+            kws_data, source_angle=0, snr=60)
+
+        print(kws_data_reverb.shape)
+        start_pos = 120000
+        for m in range(x.shape[0]):
+            x[m, start_pos:start_pos+kws_data_reverb.shape[1]] += kws_data_reverb[m, :]
+        audiowrite('DistantSpeech/kws/wav/target_90_interf_30.wav', x.transpose())
+
+    print(x.shape)
     start = time()
 
     fdgsc = DualMicKws(MicArrayObj, frameLen, hop, nfft, c, fs)
@@ -207,7 +224,7 @@ def main(args):
 
     print(yout.shape)
 
-    audiowrite('DistantSpeech/kws/wav/out_bm.wav', yout)
+    audiowrite('DistantSpeech/kws/wav/out_bm_diy.wav', yout)
 
     end = time()
     print(end - start)
@@ -241,6 +258,24 @@ def test_delay():
     plt.plot(np.squeeze(output))
     plt.show()
 
+def test_delay_buffer():
+    from matplotlib import pyplot as plt
+    t = np.arange(8000) / 1000.0
+    f = 1000
+    fs = 1000
+    x = np.sin(2 * np.pi * f / fs * t)
+
+    delay = 0
+    buffer_len = 3
+    x_vec = np.array([1,2,3])
+    delay_obj = DelayBuffer(buffer_len, delay)
+
+    x_vec_delayed = delay_obj.delay(x_vec)
+    print(x_vec_delayed)
+    x_vec_delayed = delay_obj.delay(x_vec)
+    print(x_vec_delayed)
+
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Neural Feature Extractor")
@@ -249,6 +284,10 @@ if __name__ == "__main__":
     parser.add_argument("-s", "--save", action='store_true',
                         help="set to save output")  # if set true
 
+    parser.add_argument("--real", action='store_true',
+                        help="set to use real recordings")  # if set true
+
     args = parser.parse_args()
     main(args)
     # test_delay()
+    # test_delay_buffer()
