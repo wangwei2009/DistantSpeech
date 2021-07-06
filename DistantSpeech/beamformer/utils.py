@@ -97,7 +97,7 @@ def load_wav(filepath):
     is_channel_1 = 1
     min_len = 0
     for names in filename:
-        x1, sr = librosa.load(filepath, sr=None)
+        x1, sr = librosa.load(names, sr=None)
         if is_channel_1:
             min_len = len(x1)
             is_channel_1 = 0
