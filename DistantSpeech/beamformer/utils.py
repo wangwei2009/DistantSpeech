@@ -81,7 +81,7 @@ def find_files(filepath, fileType: str):
     wavlist = []
     for names in filename:
         if names.endswith(fileType):
-            wavlist.append(names)
+            wavlist.append(os.path.join(filepath, names))
     return wavlist
 
 
@@ -123,7 +123,7 @@ def load_pcm(filepath):
     filename = find_files(filepath, ".pcm")
     wavdata_list = []
     for names in filename:
-        x1 = np.memmap(filepath + names, dtype='h', mode='r') / 32768.0
+        x1 = np.memmap(names, dtype='h', mode='r') / 32768.0
         wavdata_list.append(x1)
     L = len(wavdata_list[0])
     M = len(filename)
