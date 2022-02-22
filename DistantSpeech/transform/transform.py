@@ -7,8 +7,16 @@ from librosa.filters import get_window
 from numba import jit
 
 
-def stft(y, n_fft=2048, hop_length=None, win_length=None, window='hann',
-         center=True, dtype=np.complex64, pad_mode='reflect'):
+def stft(
+    y,
+    n_fft=2048,
+    hop_length=None,
+    win_length=None,
+    window="hann",
+    center=True,
+    dtype=np.complex64,
+    pad_mode="reflect",
+):
     """Short-time Fourier transform (STFT). [1]_ (chapter 2)
 
     The STFT represents a signal in the time-frequency domain by
@@ -201,20 +209,19 @@ def stft(y, n_fft=2048, hop_length=None, win_length=None, window='hann',
     y_frames = util.frame(y, frame_length=n_fft, hop_length=hop_length)
 
     # Pre-allocate the STFT matrix
-    stft_matrix = np.empty((int(1 + n_fft // 2), y_frames.shape[1]),
-                           dtype=dtype,
-                           order='F')
+    stft_matrix = np.empty(
+        (int(1 + n_fft // 2), y_frames.shape[1]), dtype=dtype, order="F"
+    )
 
     # how many columns can we fit within MAX_MEM_BLOCK?
-    n_columns = int(util.MAX_MEM_BLOCK / (stft_matrix.shape[0] *
-                                          stft_matrix.itemsize))
+    n_columns = int(util.MAX_MEM_BLOCK / (stft_matrix.shape[0] * stft_matrix.itemsize))
 
     for bl_s in range(0, stft_matrix.shape[1], n_columns):
         bl_t = min(bl_s + n_columns, stft_matrix.shape[1])
 
-        stft_matrix[:, bl_s:bl_t] = np.fft.rfft(fft_window *
-                                             y_frames[:, bl_s:bl_t],
-                                             axis=0)
+        stft_matrix[:, bl_s:bl_t] = np.fft.rfft(
+            fft_window * y_frames[:, bl_s:bl_t], axis=0
+        )
     return stft_matrix
 
 
@@ -228,11 +235,18 @@ def __overlap_add(y, ytmp, hop_length):
     n_fft = ytmp.shape[0]
     for frame in range(ytmp.shape[1]):
         sample = frame * hop_length
-        y[sample:(sample + n_fft)] += ytmp[:, frame]
+        y[sample : (sample + n_fft)] += ytmp[:, frame]
 
 
-def istft(stft_matrix, hop_length=None, win_length=None, window='hann',
-          center=True, dtype=np.float32, length=None):
+def istft(
+    stft_matrix,
+    hop_length=None,
+    win_length=None,
+    window="hann",
+    center=True,
+    dtype=np.float32,
+    length=None,
+):
     """
     Inverse short-time Fourier transform (ISTFT).
 
@@ -341,16 +355,14 @@ def istft(stft_matrix, hop_length=None, win_length=None, window='hann',
             padded_length = length + int(n_fft)
         else:
             padded_length = length
-        n_frames = min(
-            stft_matrix.shape[1], int(np.ceil(padded_length / hop_length)))
+        n_frames = min(stft_matrix.shape[1], int(np.ceil(padded_length / hop_length)))
     else:
         n_frames = stft_matrix.shape[1]
 
     expected_signal_len = n_fft + hop_length * (n_frames - 1)
     y = np.zeros(expected_signal_len, dtype=dtype)
 
-    n_columns = int(util.MAX_MEM_BLOCK // (stft_matrix.shape[0] *
-                                           stft_matrix.itemsize))
+    n_columns = int(util.MAX_MEM_BLOCK // (stft_matrix.shape[0] * stft_matrix.itemsize))
 
     frame = 0
     for bl_s in range(0, n_frames, n_columns):
@@ -360,9 +372,9 @@ def istft(stft_matrix, hop_length=None, win_length=None, window='hann',
         ytmp = ifft_window * np.fft.irfft(stft_matrix[:, bl_s:bl_t], axis=0)
 
         # Overlap-add the istft block starting at the i'th frame
-        __overlap_add(y[frame * hop_length:], ytmp, hop_length)
+        __overlap_add(y[frame * hop_length :], ytmp, hop_length)
 
-        frame += (bl_t - bl_s)
+        frame += bl_t - bl_s
 
     # Normalize by sum of squared window
     # ifft_window_sum = window_sumsquare(window,
@@ -379,7 +391,7 @@ def istft(stft_matrix, hop_length=None, win_length=None, window='hann',
         # If we don't need to control length, just do the usual center trimming
         # to eliminate padded data
         if center:
-            y = y[int(n_fft // 2):-int(n_fft // 2)]
+            y = y[int(n_fft // 2) : -int(n_fft // 2)]
     else:
         if center:
             # If we're centering, crop off the first n_fft//2 samples
@@ -408,7 +420,7 @@ class Transform(object):
         if window is not None:
             self.window = window
         else:
-            self.window = get_window('hann', n_fft, fftbins=True)
+            self.window = get_window("hann", n_fft, fftbins=True)
             self.window = np.sqrt(self.window)
         self.half_bin = int(self.n_fft / 2 + 1)
 
@@ -424,11 +436,16 @@ class Transform(object):
         x = np.asfortranarray(x)
         # Compute the number of frames that will fit. The end may get truncated.
         n_frames = 1 + int((x.shape[0] - self.frame_length) / self.hop_length)
-        Y = np.zeros((self.half_bin, n_frames, self.channel), dtype=np.complex)
+        Y = np.zeros((self.half_bin, n_frames, self.channel), dtype=np.complex128)
         for ch in range(self.channel):
-            Y[:, :, ch] = stft(x[:, ch], n_fft=self.n_fft, hop_length=self.hop_length,
-                               center=False, window=self.window)  # [1 + n_fft/2, n_frames]
-            self.previous_input[:, ch] = x[-self.hop_length:, ch]
+            Y[:, :, ch] = stft(
+                x[:, ch],
+                n_fft=self.n_fft,
+                hop_length=self.hop_length,
+                center=False,
+                window=self.window,
+            )  # [1 + n_fft/2, n_frames]
+            self.previous_input[:, ch] = x[-self.hop_length :, ch]
 
         return np.squeeze(Y)
 
@@ -440,42 +457,55 @@ class Transform(object):
         """
         if len(Y.shape) == 1:  # single frame
             Y = Y[:, np.newaxis]
-        x = istft(Y, hop_length=self.hop_length, win_length=self.n_fft, center=False, window=self.window)
-        x[:self.hop_length] += self.previous_output[:, 0]
-        self.previous_output[:, 0] = x[-self.hop_length:]
-        return x[:-self.hop_length]
+        x = istft(
+            Y,
+            hop_length=self.hop_length,
+            win_length=self.n_fft,
+            center=False,
+            window=self.window,
+        )
+        x[: self.hop_length] += self.previous_output[:, 0]
+        self.previous_output[:, 0] = x[-self.hop_length :]
+        return x[: -self.hop_length]
 
     def magphase(self, D, power=1):
         mag = np.abs(D)
         mag **= power
-        phase = np.exp(1.j * np.angle(D))
+        phase = np.exp(1.0j * np.angle(D))
 
         return mag, phase
 
 
-if __name__ == '__main__':
-    filename = 'speech1.wav'
+if __name__ == "__main__":
+    filename = "DistantSpeech/transform/speech1.wav"
     data, sr = librosa.load(filename, sr=None)
 
     data_recon = np.zeros(len(data))
     t = 0
     frame_length = 1120
-    stream = librosa.stream(filename, block_length=1,
-                            frame_length=frame_length,
-                            hop_length=frame_length,
-                            mono=True)
+    stream = librosa.stream(
+        filename,
+        block_length=1,
+        frame_length=frame_length,
+        hop_length=frame_length,
+        mono=True,
+    )
     transform = Transform(n_fft=320, hop_length=160)
     for y_block in stream:
         if len(y_block) >= 1024:
-            D = transform.stft(y_block)
-            D = D[:, :, 0]
+            D = transform.stft(y_block)  # [half_bin, n_frame]
             d = transform.istft(D)
-            data_recon[t * frame_length:(t + 1) * frame_length] = d
+            data_recon[t * frame_length : (t + 1) * frame_length] = d
         t = t + 1
 
     # compare difference between original signal and reconstruction signal
-    plt.plot(data[:len(data_recon[160:])] - data_recon[160:])
+    plt.figure()
+    plt.plot(data[: len(data_recon[160:])] - data_recon[160:])
+    plt.title("difference between source and reconstructed signal")
+    plt.xlabel("samples")
+    plt.ylabel("amplitude")
     plt.show()
 
-    sd.play(data_recon, sr)
-    sd.wait()
+    # if you want to listen the reconstructed signal, uncomment section below
+    # sd.play(data_recon, sr)
+    # sd.wait()
