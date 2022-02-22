@@ -5,8 +5,15 @@ import matplotlib.pyplot as plt
 from scipy.io import wavfile
 from scipy.signal import fftconvolve
 import pyroomacoustics as pra
-from DistantSpeech.beamformer.utils import mesh, pmesh, load_wav, load_pcm, visual, \
-    save_audio, load_audio
+from DistantSpeech.beamformer.utils import (
+    mesh,
+    pmesh,
+    load_wav,
+    load_pcm,
+    visual,
+    save_audio,
+    load_audio,
+)
 from DistantSpeech.beamformer.utils import save_audio as audiowrite
 from DistantSpeech.beamformer.utils import load_audio as audioread
 
@@ -90,31 +97,39 @@ def sph2cart(azimuth, elevation, r):
     :param r:
     :return:
     """
-    cos_elevation = np.cos(elevation)                # 0 lines in x-y plane
-    x = r * cos_elevation * np.cos(azimuth)          # 0 lines in x-axis
-    y = r * cos_elevation * np.sin(azimuth)          # 90 lines in y-axis
+    cos_elevation = np.cos(elevation)  # 0 lines in x-y plane
+    x = r * cos_elevation * np.cos(azimuth)  # 0 lines in x-axis
+    y = r * cos_elevation * np.sin(azimuth)  # 90 lines in y-axis
     z = r * np.sin(elevation)
     return [x, y, z]
 
+
 class ArraySim(object):
-    def __init__(self, array_type='linear', M=3, spacing=0.032, coordinate=None, fs=16000):
-        assert array_type in ['linear', 'circular', 'arbitrary']
+    def __init__(
+        self, array_type="linear", M=3, spacing=0.032, coordinate=None, fs=16000
+    ):
+        assert array_type in ["linear", "circular", "arbitrary"]
 
         self.corners = np.array([[0, 0], [0, 3], [5, 3], [5, 0]]).T  # [x,y]
 
-        self.height = 3.
+        self.height = 3.0
 
         self.center_loc = np.zeros((3,))
-        self.center_loc[0] = (self.corners[0, 0] + self.corners[0, 2])/2
+        self.center_loc[0] = (self.corners[0, 0] + self.corners[0, 2]) / 2
         self.center_loc[1] = (self.corners[1, 0] + self.corners[1, 2]) / 2
         self.center_loc[2] = 0.5
 
         self.R = linear_3d_array(self.center_loc, M, 0, spacing)
 
         # set max_order to a low value for a quick (but less accurate) RIR
-        self.room = pra.Room.from_corners(self.corners, fs=fs, max_order=3, materials=pra.Material(0.7, 0.15),
-                                          ray_tracing=True,
-                                          air_absorption=True)
+        self.room = pra.Room.from_corners(
+            self.corners,
+            fs=fs,
+            max_order=3,
+            materials=pra.Material(0.7, 0.15),
+            ray_tracing=True,
+            air_absorption=True,
+        )
         self.room.extrude(self.height, materials=pra.Material(0.7, 0.15))
 
         # Set the ray tracing parameters
@@ -137,26 +152,33 @@ class ArraySim(object):
 
         return self.room.mic_array.signals.transpose()  # (n_samples, n_channels)
 
-    def generate_audio(self, source_signal,
-                       interference=None,
-                       source_angle=90,
-                       source_distance=1.0,
-                       interf_angle=30,
-                       interf_distance=1.0,
-                       snr=30, sir=15):
+    def generate_audio(
+        self,
+        source_signal,
+        interference=None,
+        source_angle=90,
+        source_distance=1.0,
+        interf_angle=30,
+        interf_distance=1.0,
+        snr=30,
+        sir=15,
+    ):
         if interference is not None:
             interf = interference
         else:
-            interf = np.random.random(len(source_signal))/10
+            interf = np.random.random(len(source_signal)) / 10
 
         # SNR = 10log10(sum(s.^2)/sum(n^2))
-        noise_scale = np.sqrt(np.sum(source_signal ** 2)/(np.sum(interf ** 2)*np.power(10, snr/10.0)+1e-6))
+        noise_scale = np.sqrt(
+            np.sum(source_signal**2)
+            / (np.sum(interf**2) * np.power(10, snr / 10.0) + 1e-6)
+        )
         interf = noise_scale * interf
 
-        source_location = sph2cart(source_angle*np.pi/180, 0, 1.0)
+        source_location = sph2cart(source_angle * np.pi / 180, 0, 1.0)
         source_location += self.center_loc
 
-        interf_location = sph2cart(interf_angle*np.pi/180, 0, 1.5)
+        interf_location = sph2cart(interf_angle * np.pi / 180, 0, 1.5)
         interf_location += self.center_loc
 
         # add source and set the signal to WAV file content
@@ -178,19 +200,26 @@ class ArraySim(object):
 
         signals_reverb = self.room.mic_array.signals  # [n_ch, samples]
 
-        signals_reverb = signals_reverb[:, :len(source_signal)]
+        signals_reverb = signals_reverb[:, : len(source_signal)]
 
         return signals_reverb
 
 
-def generate_audio(array_type='linear', spacing=0.032, coordinate=None, fs=16000,
-                   target=None, interf=None,
-                   sir=20, snr=20):
-    assert array_type in ['linear', 'circular', 'arbitrary']
+def generate_audio(
+    array_type="linear",
+    spacing=0.032,
+    coordinate=None,
+    fs=16000,
+    target=None,
+    interf=None,
+    sir=20,
+    snr=20,
+):
+    assert array_type in ["linear", "circular", "arbitrary"]
     # corners = np.array([[0, 0], [0, 3], [5, 3], [5, 1], [3, 1], [3, 0]]).T  # [x,y]
     corners = np.array([[0, 0], [0, 3], [5, 3], [5, 0]]).T  # [x,y]
 
-    height = 3.
+    height = 3.0
 
     center_loc = np.mean(corners, axis=0)
 
@@ -207,8 +236,14 @@ def generate_audio(array_type='linear', spacing=0.032, coordinate=None, fs=16000
     signal = target
 
     # set max_order to a low value for a quick (but less accurate) RIR
-    room = pra.Room.from_corners(corners, fs=fs, max_order=8, materials=pra.Material(0.2, 0.15), ray_tracing=True,
-                                 air_absorption=True)
+    room = pra.Room.from_corners(
+        corners,
+        fs=fs,
+        max_order=8,
+        materials=pra.Material(0.2, 0.15),
+        ray_tracing=True,
+        air_absorption=True,
+    )
     room.extrude(height, materials=pra.Material(0.2, 0.15))
 
     # Set the ray tracing parameters
@@ -218,7 +253,9 @@ def generate_audio(array_type='linear', spacing=0.032, coordinate=None, fs=16000
     room.add_source([3.50, 1.0, 0.5], signal=signal)
 
     # add two-microphone array
-    R = np.array([[3.45, 3.50, 3.55], [2., 2., 2.], [0.5, 0.5, 0.5]])  # [[x], [y], [z]]
+    R = np.array(
+        [[3.45, 3.50, 3.55], [2.0, 2.0, 2.0], [0.5, 0.5, 0.5]]
+    )  # [[x], [y], [z]]
     room.add_microphone(R)
 
     # compute image sources
@@ -246,23 +283,27 @@ def generate_audio(array_type='linear', spacing=0.032, coordinate=None, fs=16000
     # signals_reverb = signals_reverb.astype(np.float32)
     # wavfile.write('clean_speech_reverb.wav', fs, signals_reverb.T)
 
-    signals_reverb = signals_reverb[:, :len(signal)]
+    signals_reverb = signals_reverb[:, : len(signal)]
 
     return signals_reverb
 
 
 def main(args):
-    signal = audioread("wav/clean_speech.wav")
+    signal = audioread("samples/audio_samples/cleanspeech_aishell3.wav")
     fs = 16000
-    mic_array = ArraySim(array_type='linear', spacing=0.05)
+    mic_array = ArraySim(array_type="linear", spacing=0.05)
     array_data = mic_array.generate_audio(signal)
     print(array_data.shape)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Neural Feature Extractor")
-    parser.add_argument("-l", "--listen", action='store_true', help="set to listen output")  # if set true
-    parser.add_argument("-s", "--save", action='store_true', help="set to save output")  # if set true
+    parser.add_argument(
+        "-l", "--listen", action="store_true", help="set to listen output"
+    )  # if set true
+    parser.add_argument(
+        "-s", "--save", action="store_true", help="set to save output"
+    )  # if set true
 
     args = parser.parse_args()
     main(args)
