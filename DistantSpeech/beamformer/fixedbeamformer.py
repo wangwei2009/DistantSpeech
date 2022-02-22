@@ -4,18 +4,18 @@ import numpy as np
 from .MicArray import MicArray
 from .beamformer import beamformer
 import warnings
-from DistantSpeech.transform.transform import Transform
 
 
-class fixedbeamformer(beamformer):
-
+class FixedBeamformer(beamformer):
     def __init__(self, MicArray, frameLen=256, hop=None, nfft=None, c=343, fs=16000):
 
-        beamformer.__init__(self, MicArray, frame_len=frameLen, hop=hop, nfft=nfft, c=c, fs=fs)
+        beamformer.__init__(
+            self, MicArray, frame_len=frameLen, hop=hop, nfft=nfft, c=c, fs=fs
+        )
         self.angle = np.array([197, 0]) / 180 * np.pi
         self.gamma = MicArray.gamma
         self.window = windows.hann(self.frameLen, sym=False)
-        self.win_scale = np.sqrt(1.0/self.window.sum()**2)
+        self.win_scale = np.sqrt(1.0 / self.window.sum() ** 2)
         self.freq_bin = np.linspace(0, self.half_bin - 1, self.half_bin)
         self.omega = 2 * np.pi * self.freq_bin * self.fs / self.nfft
 
@@ -23,10 +23,8 @@ class fixedbeamformer(beamformer):
 
         self.angle = np.array([0, 0]) / 180 * np.pi
 
-        self.AlgorithmList = ['src', 'DS', 'MVDR']
+        self.AlgorithmList = ["src", "DS", "MVDR"]
         self.AlgorithmIndex = 0
-
-        self.transformer = Transform(n_fft=self.nfft, hop_length=self.hop, channel=self.M)
 
     def process(self, x, angle, method=1, retH=False, retWNG=False, retDI=False):
         """
@@ -67,12 +65,14 @@ class fixedbeamformer(beamformer):
                 self.AlgorithmIndex = method
             for k in range(0, self.half_bin):
                 a = np.mat(np.exp(-1j * self.omega[k] * tao)).T  # propagation vector
-                self.H[:, k, np.newaxis] = self.getweights(a,self.AlgorithmList[method],self.Fvv[k, :, :],Diagonal=1e-1)
+                self.H[:, k, np.newaxis] = self.getweights(
+                    a, self.AlgorithmList[method], self.Fvv[k, :, :], Diagonal=1e-1
+                )
 
                 if retWNG:
-                    WNG[k] = self.calcWNG(a, self.H[:,k,np.newaxis])
+                    WNG[k] = self.calcWNG(a, self.H[:, k, np.newaxis])
                 if retDI:
-                    DI[k] = self.calcDI(a, self.H[:, k, np.newaxis],self.Fvv[k,:,:])
+                    DI[k] = self.calcDI(a, self.H[:, k, np.newaxis], self.Fvv[k, :, :])
 
         Y = np.ones([self.half_bin, frameNum], dtype=complex)
         for t in range(0, frameNum):
@@ -88,15 +88,6 @@ class fixedbeamformer(beamformer):
 
         # calculate beampattern
         if retH:
-            beampattern = self.beampattern(self.omega,self.H)
+            beampattern = self.beampattern(self.omega, self.H)
 
-        return {'data':yout,
-                'WNG':WNG,
-                'DI':DI,
-                'beampattern':beampattern
-                }
-
-
-
-
-
+        return {"data": yout, "WNG": WNG, "DI": DI, "beampattern": beampattern}
