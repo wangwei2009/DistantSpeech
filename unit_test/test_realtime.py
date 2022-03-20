@@ -1,12 +1,10 @@
-
-
 import time
 import pyaudio
 import numpy as np
 from beamformer.MicArray import MicArray
 from beamformer.fixedbeamformer import fixedbeamfomer
 from beamformer.adaptivebeamformer import adaptivebeamfomer
-from beamformer.utils import mesh,pmesh,load_wav
+from beamformer.utils import mesh, pmesh, load_wav
 
 from beamformer.realtime_processing import realtime_processing
 

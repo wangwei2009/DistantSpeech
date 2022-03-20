@@ -4,7 +4,7 @@ import pyaudio
 import wave
 import time
 import sys
-from beamformer.utils import mesh,pmesh,load_wav
+from beamformer.utils import mesh, pmesh, load_wav
 import numpy as np
 from beamformer.MicArray import MicArray
 from beamformer.fixedbeamformer import fixedbeamfomer
@@ -16,12 +16,12 @@ if len(sys.argv) < 2:
     sys.exit(-1)
 
 filepath = "E:/work/matlab/Github/beamformer/sound/rec1/"
-x,sr = load_wav(filepath)
+x, sr = load_wav(filepath)
 r = 0.032
 c = 343
 
 frameLen = 256
-hop = int(frameLen/2)
+hop = int(frameLen / 2)
 overlap = frameLen - hop
 nfft = 256
 c = 343
@@ -33,19 +33,19 @@ start = time.clock()
 MicArray = MicArray(arrayType='circular', r=0.032, M=4)
 angle = np.array([197, 0]) / 180 * np.pi
 
-frameNum = round(x.shape[1]/hop)-1
+frameNum = round(x.shape[1] / hop) - 1
 wf = wave.open(sys.argv[1], 'rb')
 
 # instantiate PyAudio (1)
 p = pyaudio.PyAudio()
 
 t = 0
-fixedbeamformer = fixedbeamfomer(MicArray,256,128,nfft,c,r,fs)
+fixedbeamformer = fixedbeamfomer(MicArray, 256, 128, nfft, c, r, fs)
 # define callback (2)
 def callback(in_data, frame_count, time_info, status):
     global t
     # data = wf.readframes(frame_count)
-    data = x[:,t*frameLen:t*frameLen+frameLen]
+    data = x[:, t * frameLen : t * frameLen + frameLen]
     start = time.clock()
     yout = fixedbeamformer.superDirectiveMVDR2(data, angle)
     # samps = yout['out']
@@ -55,16 +55,12 @@ def callback(in_data, frame_count, time_info, status):
     # samps = data[1, :]
 
     data = (samps * 32768).astype('<i2').tostring()
-    t = t+1
+    t = t + 1
     return (data, pyaudio.paContinue)
 
+
 # open stream using callback (3)
-stream = p.open(format=p.get_format_from_width(WIDTH),
-                channels=wf.getnchannels(),
-                rate=wf.getframerate(),
-                output=True,
-                stream_callback=callback,
-                frames_per_buffer=frameLen)
+stream = p.open(format=p.get_format_from_width(WIDTH), channels=wf.getnchannels(), rate=wf.getframerate(), output=True, stream_callback=callback, frames_per_buffer=frameLen)
 
 # start the stream (4)
 stream.start_stream()

@@ -8,15 +8,14 @@ import numpy as np
 from beamformer.MicArray import MicArray
 from beamformer.fixedbeamformer import fixedbeamfomer
 from beamformer.adaptivebeamformer import adaptivebeamfomer
-from beamformer.utils import mesh,pmesh,load_wav
-
+from beamformer.utils import mesh, pmesh, load_wav
 
 
 r = 0.032
 c = 343
 
 frameLen = 256
-hop = frameLen/2
+hop = frameLen / 2
 overlap = frameLen - hop
 nfft = 256
 c = 343
@@ -26,7 +25,7 @@ fs = 16000
 MicArray = MicArray(arrayType='circular', r=0.032, M=4)
 angle = np.array([197, 0]) / 180 * np.pi
 
-fixedbeamformer = fixedbeamfomer(MicArray,frameLen,hop,nfft,c,r,fs)
+fixedbeamformer = fixedbeamfomer(MicArray, frameLen, hop, nfft, c, r, fs)
 # yout = fixedbeamformer.superDirectiveMVDR2(x,angle)
 
 
@@ -38,40 +37,46 @@ RECORD_SECONDS = 10
 
 p = pyaudio.PyAudio()
 
-streamOut = p.open(format=p.get_format_from_width(WIDTH),
-                channels=1,
-                rate=RATE,
-                input=False,
-                output=True,
-                # output_device_index=4,
-                frames_per_buffer=CHUNK)
+streamOut = p.open(
+    format=p.get_format_from_width(WIDTH),
+    channels=1,
+    rate=RATE,
+    input=False,
+    output=True,
+    # output_device_index=4,
+    frames_per_buffer=CHUNK,
+)
 
 # define callback (2)
 def callback(in_data, frame_count, time_info, status):
     # data = wf.readframes(frame_count)
     if CHANNELS == 6:
-         # print(len(data))
+        # print(len(data))
         samps = np.fromstring(in_data, dtype=np.int16)
         # print(len(samps))
         start = time.clock()
         samps = np.reshape(samps, (CHUNK, 6))
-        yout = fixedbeamformer.superDirectiveMVDR(samps[:,0:4].T, angle)
+        yout = fixedbeamformer.superDirectiveMVDR(samps[:, 0:4].T, angle)
 
         # samps = samps[:, 0]
         samps = yout['out']
         data = samps.astype(np.int16).tostring()
         end = time.clock()
         streamOut.write(data, CHUNK)  # play back audio stream
-        print(end - start,'\n')
+        print(end - start, '\n')
     return (data, pyaudio.paContinue)
-stream = p.open(format=p.get_format_from_width(WIDTH),
-                channels=CHANNELS,
-                rate=RATE,
-                input=True,
-                output=False,
-                # output_device_index=4,
-                frames_per_buffer=CHUNK,
-                stream_callback=callback)
+
+
+stream = p.open(
+    format=p.get_format_from_width(WIDTH),
+    channels=CHANNELS,
+    rate=RATE,
+    input=True,
+    output=False,
+    # output_device_index=4,
+    frames_per_buffer=CHUNK,
+    stream_callback=callback,
+)
 
 
 print("* recording")
