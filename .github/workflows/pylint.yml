@@ -20,6 +20,7 @@ jobs:
         pip install numpy wheel
         sudo apt install portaudio19-dev
         pip install -r requirements.txt
+        pip install pylint
     - name: Analysing the code with pylint
       run: |
         pylint --disable=all --enable=unused-import $(git ls-files '*.py')
