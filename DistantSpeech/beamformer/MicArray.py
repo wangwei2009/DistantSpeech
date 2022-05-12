@@ -49,7 +49,7 @@ class MicArray(object):
         # %                /
         # %               / +x
         # %              0 degree
-        # % for linear arrays, mic0 lines on -y axis
+        # % for linear arrays, mic0 lines on +y axis
         # % 
         # % for circular arrays, mic0 lies on +x axis
         """
@@ -61,7 +61,7 @@ class MicArray(object):
             for m in range(self.M):
                 self.mic_loc[m, :] = sph2cart(az[m], elevation, self.r)
         elif self.array_type == 'linear':
-            self.mic_loc[:, 1] = (np.arange(self.M) - (self.M - 1) / 2) * self.r
+            self.mic_loc[:, 1] = -(np.arange(self.M) - (self.M - 1) / 2) * self.r
         else:
             assert self.mic_loc.shape == mic_loc.shape, 'user defined mic location should be 2-D array with shape M X 3'
             self.mic_loc = mic_loc
@@ -70,8 +70,8 @@ class MicArray(object):
 
 
 def compute_tau(mic_array: MicArray, incident_angle):
-    """compute delay time between mic, (0,0,0) as reference point,
-    negative tau[m] indicates signal arrive at mic[m] in advance of zero point
+    """compute delay time between mic, use (0,0,0) as reference point bu default,
+    negative tau[m] indicates signal arrives at mic[m] in advance of zero point
 
     Parameters
     ----------
