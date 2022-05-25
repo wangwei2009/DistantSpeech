@@ -108,10 +108,10 @@ class McSpp(McSppBase):
 
         return self.q_local[k]
 
-    def compute_weight_k(self, xi, Rxx, Rvv_inv, k, Gmin=0.0631):
+    def compute_weight_k(self, xi, Rxx, Rvv_inv, k, Gmin=0.0631, beta=1):
         u = np.zeros((self.channels, 1))
         u[0, 0] = 1
-        self.w[:, k : k + 1] = Rvv_inv @ Rxx @ u / (1 + xi)
+        self.w[:, k : k + 1] = Rvv_inv @ Rxx @ u / (beta + xi)
 
     def compute_weight(self, xi, Gmin=0.0631):
         self.G_H1 = self.xi / (1 + self.xi)
@@ -166,20 +166,6 @@ class McSpp(McSppBase):
 
         for k in range(self.half_bin):
 
-            # mel_freq = 2595 * np.log10(1 + k * 16000 / 512 / 700)
-            # if mel_freq < 500:
-            #     diag_value = np.eye(M) * diag
-            # elif mel_freq >= 500 and mel_freq < 2000:
-            #     diag_value = np.eye(M) * diag / 10
-            # elif mel_freq >= 2000:
-            #     diag_value = np.eye(M) * diag / 100
-
-            # if np.real(np.trace((self.Phi_xx[:, :, k]))) < 1e-6:
-            #     self.Phi_xx[:, :, k] = np.eye(M) * 1e-6
-            #     Phi_vv_inv = np.linalg.inv(self.Phi_yy[:, :, k] + diag_value)
-            # else:
-            #     Phi_vv_inv = np.linalg.inv(self.Phi_vv[:, :, k] + diag_value)
-
             Phi_vv_inv = np.linalg.inv(self.Phi_vv[:, :, k] + diag_value)
 
             self.xi[k] = np.real(np.trace(Phi_vv_inv @ self.Phi_xx[:, :, k]))
@@ -194,32 +180,42 @@ class McSpp(McSppBase):
             )
             self.gamma[k] = np.minimum(np.maximum(self.gamma[k], 1e-6), 1e8)
 
-            self.compute_weight_k(self.xi[k], self.Phi_xx[:, :, k], Phi_vv_inv, k)
+            self.compute_weight_k(self.xi[k], self.Phi_xx[:, :, k], Phi_vv_inv, k, beta=0)
 
         self.xi_last[:] = self.xi  # .copy()
 
-        self.compute_p()
-        self.update_noise_psd(y, beta=1.0)
+        self.compute_p(p_max=0.999, p_min=1e-3)
+        self.update_noise_psd(y, psd_yy=psd_yy, beta=1.0)
         # self.compute_weight(self.xi)
 
         self.frm_cnt = self.frm_cnt + 1
 
         return self.p
 
-    def update_noise_psd(self, y: np.ndarray, beta=1.0):
-        """
-        update noise PSD using spp
-        :param y: complex noisy signal vector, [half_bin, channel]
-        :param beta:
-        :return:
+    def update_noise_psd(self, y: np.ndarray, psd_yy=None, beta=1.0):
+        """_summary_
+
+        Parameters
+        ----------
+        y : np.ndarray, [half_bin, channels]
+            input signal
+        psd_yy : np.ndarray, [bin, M, M]
+            noisy PSD matrix, by default None
+        beta : float, optional
+            _description_, by default 1.0
         """
         self.alpha_tilde = self.alpha_d + (1 - self.alpha_d) * self.p  # eq 5,
 
         # eq.17 in [1]
-        for k in range(self.half_bin):
-            self.Phi_vv[:, :, k] = self.alpha_tilde[k] * self.Phi_vv[:, :, k] + beta * (1 - self.alpha_tilde[k]) * (
-                y[k : k + 1, :].T @ y[k : k + 1, :].conj()
+        if psd_yy is not None:
+            self.Phi_vv = self.alpha_tilde * self.Phi_vv + beta * (1 - self.alpha_tilde) * np.transpose(
+                psd_yy, (1, 2, 0)
             )
+        else:
+            for k in range(self.half_bin):
+                self.Phi_vv[:, :, k] = self.alpha_tilde[k] * self.Phi_vv[:, :, k] + beta * (1 - self.alpha_tilde[k]) * (
+                    y[k : k + 1, :].T @ y[k : k + 1, :].conj()
+                )
 
 
 def main(args):
@@ -233,6 +229,9 @@ def main(args):
     pampath = '/home/wangwei/work/DistantSpeech/samples/bookself/1'
     # pampath = '/home/wangwei/work/corpus/kws/lanso/record_test/meetingroom/20220106/pcm'
     x = load_pcm(pampath)
+
+    filepath = "example/test_audio/rec1/"
+    x, sr = load_wav(os.path.abspath(filepath))  # [channel,samples]
 
     # filepath = "../../example/test_audio/rec1/"  # [u1,u2,u3,y]
     # # filepath = "./test_audio/rec1_mcra_gsc/"     # [y,u1,u2,u3]
