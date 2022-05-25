@@ -180,7 +180,7 @@ class McSpp(McSppBase):
             )
             self.gamma[k] = np.minimum(np.maximum(self.gamma[k], 1e-6), 1e8)
 
-            self.compute_weight_k(self.xi[k], self.Phi_xx[:, :, k], Phi_vv_inv, k, beta=0)
+            self.compute_weight_k(self.xi[k], self.Phi_xx[:, :, k], Phi_vv_inv, k, beta=1)
 
         self.xi_last[:] = self.xi  # .copy()
 
