@@ -29,6 +29,7 @@ class MicArray(object):
         self.M = M
         self.n_fft = n_fft
         self.half_bin = round(self.n_fft / 2 + 1)
+        self.freq_bin = np.linspace(0, self.half_bin - 1, self.half_bin)
         self.gamma = np.arange(0, 360, int(360 / self.M)) * np.pi / 180
 
         self.array_sim = ArraySim(arrayType, spacing=r, M=M)
@@ -67,6 +68,15 @@ class MicArray(object):
             self.mic_loc = mic_loc
 
         return self.mic_loc
+
+    def steering_vector(self, look_direction=0):
+        omega = 2 * np.pi * self.freq_bin * self.fs / self.n_fft
+        a = np.zeros((self.M, self.half_bin), dtype=complex)
+        for k in range(self.half_bin):
+            tau = compute_tau(mic_array=mic_array, incident_angle=np.array([look_direction, 0]) * np.pi / 180)
+            a[:, k : k + 1] = np.exp(-1j * omega[k] * tau)
+
+        return a  # [M, half_bin]
 
 
 def compute_tau(mic_array: MicArray, incident_angle):
