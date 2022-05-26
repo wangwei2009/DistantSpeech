@@ -3,10 +3,7 @@ from DistantSpeech.beamformer.MicArray import MicArray, compute_tau
 from DistantSpeech.beamformer.gen_noise_msc import gen_noise_msc
 import warnings
 from DistantSpeech.transform.transform import Transform
-from DistantSpeech.beamformer.utils import mesh
 from matplotlib import pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-from matplotlib import cm
 
 
 class beamformer(object):
@@ -180,7 +177,7 @@ if __name__ == "__main__":
     fs = sr
 
     MicArrayObj = MicArray(arrayType="linear", r=r, M=10)
-    angle = np.array([0, 0]) / 180 * np.pi  # look angle
+    angle = np.array([90, 0]) / 180 * np.pi  # look angle
 
     beamformer_obj = beamformer(MicArrayObj, frameLen, hop, nfft, c, fs)
 
@@ -188,14 +185,14 @@ if __name__ == "__main__":
 
     # create same figure as Page.45 in "Microphone Array Signal Processing"
     plt.figure()
-    plt.plot(beampattern[90:270, 32])  # k*fs/N = 2KHz
+    plt.plot(beampattern[0:180, 32])  # k*fs/N = 2KHz
     plt.ylim([-50, 0])
     plt.grid()
     plt.savefig('beam.png')
 
     fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
     theta = np.arange(0, 180, 1) / 180 * np.pi
-    ax.plot(theta, beampattern[90:270, 32])
+    ax.plot(theta, beampattern[0:180, 32])
     ax.set_thetamin(0)
     ax.set_thetamax(180)
     fig.savefig('beam_polar.png')

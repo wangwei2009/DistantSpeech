@@ -1,7 +1,4 @@
-from scipy.signal import windows
-from scipy import signal
 import numpy as np
-import warnings
 
 from DistantSpeech.beamformer.ArraySim import ArraySim
 
