@@ -18,68 +18,19 @@ import numpy as np
 from scipy.signal import convolve
 import soundfile as sf
 
-from DistantSpeech.noise_estimation.mcra import NoiseEstimationMCRA
-from DistantSpeech.noise_estimation.mcspp_base import McSppBase
+from DistantSpeech.noise_estimation import NoiseEstimationMCRA, MCRA2, McSppBase
 from DistantSpeech.beamformer.utils import load_pcm
 
 
 class McSpp(McSppBase):
     def __init__(self, nfft=256, channels=4) -> None:
-        super().__init__()
+        super().__init__(nfft=nfft, channels=channels)
 
-        self.channels = channels
-        self.M = self.channels
-
-        self.nfft = nfft
-        self.half_bin = int(self.nfft / 2 + 1)
-        self.lambda_d = np.zeros(self.half_bin)
-        self.alpha_d = 0.95
-
-        self.alpha = 0.92
-
-        self.alpha_s = 0.8
-        self.delta_s = 5
-        self.alpha_p = 0.2
-
-        self.ell = 1
-        self.b = [0.25, 0.5, 0.25]
-
-        self.S = np.zeros(self.half_bin)
-        self.Smin = np.zeros(self.half_bin)
-        self.Stmp = np.zeros(self.half_bin)
-
-        self.psi = np.zeros(self.half_bin)
-        self.psi_tilde = np.zeros(self.half_bin)
-        self.psi_global = np.zeros(self.half_bin)
-        self.psi_frame = []
-        self.q = np.ones(self.half_bin) * 0.6
-        self.q_local = np.ones(self.half_bin) * 0.999
-        self.q_global = np.ones(self.half_bin)
-        self.q_frame = []
-        self.q_max = 0.99
-        self.q_min = 0
-
-        self.psi_0 = 100
-        self.psi_tilde_0 = 100
-
-        self.p = np.zeros(self.half_bin)
-        self.alpha_tilde = np.zeros(self.half_bin)
-        self.G_H1 = np.zeros(self.half_bin)
-        self.G = np.zeros(self.half_bin)
-        self.w = np.zeros((self.channels, self.half_bin), dtype=complex)
-
-        self.Phi_yy = np.zeros((self.channels, self.channels, self.half_bin), dtype=complex)
-        self.Phi_vv = np.zeros((self.channels, self.channels, self.half_bin), dtype=complex)
-        self.Phi_vv_inv = np.zeros((self.channels, self.channels, self.half_bin), dtype=complex)
-        self.Phi_xx = np.zeros((self.channels, self.channels, self.half_bin), dtype=complex)
-
-        self.xi = np.zeros(self.half_bin)
-        self.xi_last = np.zeros(self.half_bin)
-        self.gamma = np.zeros(self.half_bin)
-        self.L = 125
-
-        self.mcra = NoiseEstimationMCRA(nfft=self.nfft)
+        # self.mcra = MCRA2(nfft=self.nfft)
         self.mcra.L = 10
+
+        self.w = np.zeros((self.channels, self.half_bin), dtype=complex)
+        self.xi_last = np.zeros(self.half_bin)
 
         self.frm_cnt = 0
 
@@ -113,12 +64,6 @@ class McSpp(McSppBase):
         u[0, 0] = 1
         self.w[:, k : k + 1] = Rvv_inv @ Rxx @ u / (beta + xi)
 
-    def compute_weight(self, xi, Gmin=0.0631):
-        self.G_H1 = self.xi / (1 + self.xi)
-        self.G = np.power(self.G_H1, self.p) * np.power(Gmin, (1 - self.p))
-        self.G = np.maximum(np.minimum(self.G, 1), Gmin)
-        self.G[:2] = 0
-
     def smooth_psd(self, x, previous_x, win, alpha):
         """
         smooth spectrum in frequency and time
@@ -139,7 +84,32 @@ class McSpp(McSppBase):
 
         return smoothed_x
 
-    def estimation(self, y, diag=1e-4):
+    def estimation_core(self, y, psd_yy=None, diag_value=1e-8):
+        diag = np.eye(self.channels) * diag_value
+        self.Phi_xx = self.Phi_yy - self.Phi_vv
+
+        for k in range(self.half_bin):
+
+            Phi_vv_inv = np.linalg.inv(self.Phi_vv[:, :, k] + diag)
+
+            self.xi[k] = np.real(np.trace(Phi_vv_inv @ self.Phi_xx[:, :, k]))
+            if self.frm_cnt > 1:
+                if self.xi[k] < 1e-6:
+                    self.xi[k] = self.xi_last[k]
+
+            self.xi[k] = np.minimum(np.maximum(self.xi[k], 1e-6), 1e8)
+
+            self.gamma[k] = np.abs(
+                y[k : k + 1, :].conj() @ Phi_vv_inv @ self.Phi_xx[:, :, k] @ Phi_vv_inv @ y[k : k + 1, :].T
+            )
+            self.gamma[k] = np.minimum(np.maximum(self.gamma[k], 1e-6), 1e8)
+
+            self.compute_weight_k(self.xi[k], self.Phi_xx[:, :, k], Phi_vv_inv, k, beta=1)
+
+        self.compute_p(alpha_p=0)
+        self.update_noise_psd(y, psd_yy=psd_yy, beta=1.0)
+
+    def estimation(self, y, diag=1e-4, repeat=False):
         """mcspp estimation function
 
         Parameters
@@ -157,170 +127,40 @@ class McSpp(McSppBase):
 
         self.compute_q(y, q_max=0.99, q_min=1e-2)
         self.q = np.sqrt(np.sqrt(self.q))
+        # self.q = self.q / 2
+
+        # self.p = np.sqrt(1 - self.q)
 
         if self.frm_cnt < 10:
             self.Phi_vv = self.Phi_yy
             self.q[:] = 0.99
 
-        self.Phi_xx = self.Phi_yy - self.Phi_vv
-
-        for k in range(self.half_bin):
-
-            Phi_vv_inv = np.linalg.inv(self.Phi_vv[:, :, k] + diag_value)
-
-            self.xi[k] = np.real(np.trace(Phi_vv_inv @ self.Phi_xx[:, :, k]))
-            if self.frm_cnt > 1:
-                if self.xi[k] < 1e-6:
-                    self.xi[k] = self.xi_last[k]
-
-            self.xi[k] = np.minimum(np.maximum(self.xi[k], 1e-6), 1e8)
-
-            self.gamma[k] = np.abs(
-                y[k : k + 1, :].conj() @ Phi_vv_inv @ self.Phi_xx[:, :, k] @ Phi_vv_inv @ y[k : k + 1, :].T
-            )
-            self.gamma[k] = np.minimum(np.maximum(self.gamma[k], 1e-6), 1e8)
-
-            self.compute_weight_k(self.xi[k], self.Phi_xx[:, :, k], Phi_vv_inv, k, beta=1)
+        self.estimation_core(y, psd_yy=psd_yy, diag_value=1e-8)
+        if repeat:
+            self.q = np.sqrt(1 - self.p)
+            self.estimation_core(y, psd_yy=psd_yy, diag_value=1e-8)
 
         self.xi_last[:] = self.xi  # .copy()
-
-        self.compute_p(p_max=0.999, p_min=1e-3)
-        self.update_noise_psd(y, psd_yy=psd_yy, beta=1.0)
-        # self.compute_weight(self.xi)
 
         self.frm_cnt = self.frm_cnt + 1
 
         return self.p
 
-    def update_noise_psd(self, y: np.ndarray, psd_yy=None, beta=1.0):
-        """_summary_
-
-        Parameters
-        ----------
-        y : np.ndarray, [half_bin, channels]
-            input signal
-        psd_yy : np.ndarray, [bin, M, M]
-            noisy PSD matrix, by default None
-        beta : float, optional
-            _description_, by default 1.0
-        """
-        self.alpha_tilde = self.alpha_d + (1 - self.alpha_d) * self.p  # eq 5,
-
-        # eq.17 in [1]
-        if psd_yy is not None:
-            self.Phi_vv = self.alpha_tilde * self.Phi_vv + beta * (1 - self.alpha_tilde) * np.transpose(
-                psd_yy, (1, 2, 0)
-            )
-        else:
-            for k in range(self.half_bin):
-                self.Phi_vv[:, :, k] = self.alpha_tilde[k] * self.Phi_vv[:, :, k] + beta * (1 - self.alpha_tilde[k]) * (
-                    y[k : k + 1, :].T @ y[k : k + 1, :].conj()
-                )
-
 
 def main(args):
+
     from DistantSpeech.transform.transform import Transform
-    from DistantSpeech.beamformer.utils import pmesh, load_wav
-    from matplotlib import pyplot as plt
-    import librosa
-    import time
-    from scipy.io import wavfile
+    from DistantSpeech.noise_estimation.mcspp import McSpp
 
-    pampath = '/home/wangwei/work/DistantSpeech/samples/bookself/1'
-    # pampath = '/home/wangwei/work/corpus/kws/lanso/record_test/meetingroom/20220106/pcm'
-    x = load_pcm(pampath)
-
-    filepath = "example/test_audio/rec1/"
-    x, sr = load_wav(os.path.abspath(filepath))  # [channel,samples]
-
-    # filepath = "../../example/test_audio/rec1/"  # [u1,u2,u3,y]
-    # # filepath = "./test_audio/rec1_mcra_gsc/"     # [y,u1,u2,u3]
-    # x, sr = load_wav(os.path.abspath(filepath))  # [channel, samples]
-    sr = 16000
-    r = 0.032
-    c = 343
-
-    frameLen = 256
-    hop = frameLen / 2
-    overlap = frameLen - hop
-    nfft = 256
-    c = 340
-    r = 0.032
-    fs = sr
-
-    print(x.shape)
-    channel = x.shape[0]
-
-    transform = Transform(n_fft=512, hop_length=256, channel=channel)
-
-    D = transform.stft(x.transpose())  # [F,T,Ch]
-    Y, _ = transform.magphase(D, 2)
-    print(Y.shape)
-    pmesh(librosa.power_to_db(Y[:, :, -1]))
-    plt.savefig('pmesh.png')
-
+    channel = 6
+    sample_length = 16000 * 10
+    array_data = np.random.rand(channel, sample_length)
     mcspp = McSpp(nfft=512, channels=channel)
-    noise_psd = np.zeros((Y.shape[0], Y.shape[1]))
-    p = np.zeros((Y.shape[0], Y.shape[1]))
-    Yout = np.zeros((Y.shape[0], Y.shape[1]), dtype=type(Y))
-    y = np.zeros(x.shape[1])
-
-    start = time.process_time()
-
-    for n in range(Y.shape[1]):
-        mcspp.estimation(D[:, n, :])  # [half_bin, M]
-        p[:, n] = mcspp.p
-        # Yout[:, n] = D[:, n, 0] * mcspp.G
-
-        # print('D[:, n, :]:{}'.format(D[:, n, :].shape))
-        # print('mcspp.w:{}'.format(mcspp.w.shape))
-
-        Yout[:, n] = np.sum(D[:, n, :] * mcspp.w.conj().T, axis=-1)
-
-    end = time.process_time()
-    print(end - start)
-
-    y = transform.istft(Yout)
-
-    if args.eval:
-        from pesq import pesq
-        from pystoi.stoi import stoi
-
-        ref_path = './path_to_ref'
-        ref, sr = sf.read(ref_path)
-        assert fs == sr
-        if len(ref.shape) >= 2:
-            ref = ref[:, 0]
-
-        nsy = wave_data[:, 0]
-        enh = y[256:]
-        nsy = nsy[: len(enh)]
-        ref = ref[: len(enh)]
-
-        summary = {
-            'ref_pesq': pesq(sr, ref, nsy, 'wb'),
-            'enh_pesq': pesq(sr, ref, enh, 'wb'),
-            'ref_stoi': stoi(ref, nsy, sr, extended=False),
-            'enh_stoi': stoi(ref, enh, sr, extended=False),
-            'ref_estoi': stoi(ref, nsy, sr, extended=True),
-            'enh_estoi': stoi(ref, enh, sr, extended=True),
-        }
-        for key in summary.keys():
-            print('{}:{}'.format(key, summary[key]))
-
-    # pmesh(librosa.power_to_db(noise_psd))
-    # plt.savefig('noise_psd.png')
-
-    pmesh(p)
-    plt.savefig('p.png')
-
-    plt.plot(y)
-    plt.show()
-
-    # save audio
-    if args.save:
-        audio = (y * np.iinfo(np.int16).max).astype(np.int16)
-        wavfile.write('output/output_mc_mcra.wav', 16000, audio)
+    transform = Transform(n_fft=512, hop_length=256, channel=channel)
+    D = transform.stft(np.transpose(array_data))
+    for n in range(D.shape[1]):
+        y = D[:, n, :]  # [half_bin, M]
+        mcspp.estimation(y)
 
 
 if __name__ == "__main__":
