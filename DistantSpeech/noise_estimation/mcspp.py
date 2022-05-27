@@ -88,9 +88,13 @@ class McSpp(McSppBase):
         diag = np.eye(self.channels) * diag_value
         self.Phi_xx = self.Phi_yy - self.Phi_vv
 
+        diag_bin = np.broadcast_to(diag, (self.half_bin, self.channels, self.channels))
+
+        Phi_vv_inv_bin = np.linalg.inv(np.transpose(self.Phi_vv, (2, 0, 1)) + diag_bin)
+
         for k in range(self.half_bin):
 
-            Phi_vv_inv = np.linalg.inv(self.Phi_vv[:, :, k] + diag)
+            Phi_vv_inv = Phi_vv_inv_bin[k, :, :]
 
             self.xi[k] = np.real(np.trace(Phi_vv_inv @ self.Phi_xx[:, :, k]))
             if self.frm_cnt > 1:
