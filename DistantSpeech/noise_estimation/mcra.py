@@ -1,3 +1,14 @@
+"""
+Multi-Channel Speech Presence Probability
+==============
+
+----------
+
+
+.. [1] M. Cohen, I., & Berdugo, B. (2002). Noise estimation by minima controlled recursive averaging for robust speech enhancement. IEEE Signal Processing Letters, 9(1), 12–15
+   [2] Cohen, I., & Berdugo, B. (2001). Speech enhancement for non-stationary noise environments. Signal Processing, 81(11), 2403–2418
+"""
+
 import argparse
 import os
 
@@ -7,8 +18,11 @@ from DistantSpeech.noise_estimation.NoiseEstimationBase import NoiseEstimationBa
 
 
 class NoiseEstimationMCRA(NoiseEstimationBase):
-    def __init__(self, nfft=256) -> None:
+    def __init__(self, nfft=256, p_max=0.999, p_min=1e-3) -> None:
         super(NoiseEstimationMCRA, self).__init__(nfft=nfft)
+        self.p_max = p_max
+        self.p_min = p_min
+        self.L = 15
 
     def estimation(self, Y: np.ndarray):
 
@@ -19,8 +33,10 @@ class NoiseEstimationMCRA(NoiseEstimationBase):
                 self.Smin[k] = Y[k]
                 self.Stmp[k] = Y[k]
                 self.lambda_d[k] = Y[k]
-                self.p[k] = 1.0
             else:
+                if k == 0:
+                    self.p[0] = 0
+                    continue
                 Sf = Y[k - 1] * self.b[0] + Y[k] * self.b[1] + Y[k + 1] * self.b[2]  # eq 6,frequency smoothing
                 self.S[k] = self.alpha_s * self.S[k] + (1 - self.alpha_s) * Sf  # eq 7,time smoothing
 
@@ -40,9 +56,12 @@ class NoiseEstimationMCRA(NoiseEstimationBase):
                 else:
                     I = 0
 
-                self.p[k] = self.alpha_p * self.p[k] + (
-                            1 - self.alpha_p) * I  # eq 14,updata speech presence probability
-                self.p[k] = max(min(self.p[k], 1.0), 0.0)
+                self.p[k] = (
+                    self.alpha_p * self.p[k] + (1 - self.alpha_p) * I
+                )  # eq 14,updata speech presence probability
+            if self.frm_cnt < self.L * 2:
+                self.p[k] = 0.0
+        self.p = np.maximum(np.minimum(self.p, self.p_max), self.p_min)
 
         self.frm_cnt = self.frm_cnt + 1
         self.lambda_d[self.half_bin - 1] = 1e-8
@@ -59,7 +78,7 @@ def main(args):
     import librosa
 
     filepath = "example/test_audio/rec1/"
-    x, sr = load_wav(os.path.abspath(filepath))      # [channel,samples]
+    x, sr = load_wav(os.path.abspath(filepath))  # [channel,samples]
     sr = 16000
     r = 0.032
     c = 343
