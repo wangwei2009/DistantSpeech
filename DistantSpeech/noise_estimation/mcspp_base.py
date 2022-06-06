@@ -13,6 +13,7 @@ Multi-Channel Speech Presence Probability
 
 """
 
+from math import gamma
 import os
 
 import numpy as np
@@ -53,10 +54,12 @@ class McSppBase(object):
         self.G_H1 = np.zeros(self.half_bin)
         self.G = np.zeros(self.half_bin)
 
-        self.Phi_yy = np.zeros((self.channels, self.channels, self.half_bin), dtype=complex)
-        self.Phi_vv = np.zeros((self.channels, self.channels, self.half_bin), dtype=complex)
-        self.Phi_vv_inv = np.zeros((self.channels, self.channels, self.half_bin), dtype=complex)
-        self.Phi_xx = np.zeros((self.channels, self.channels, self.half_bin), dtype=complex)
+        self.w = np.zeros((self.half_bin, self.channels), dtype=complex)
+
+        self.Phi_yy = np.zeros((self.half_bin, self.channels, self.channels), dtype=complex)
+        self.Phi_vv = np.zeros((self.half_bin, self.channels, self.channels), dtype=complex)
+        self.Phi_vv_inv = np.zeros((self.half_bin, self.channels, self.channels), dtype=complex)
+        self.Phi_xx = np.zeros((self.half_bin, self.channels, self.channels), dtype=complex)
 
         self.psd_yy = np.zeros((self.half_bin, self.channels, self.channels), dtype=np.complex128)
 
@@ -70,6 +73,7 @@ class McSppBase(object):
         self.diagonal_eps = np.eye(self.channels) * 1e-6
 
         self.mcra = NoiseEstimationMCRA(nfft=self.nfft)
+        self.mcra.L = 15
 
         self.frm_cnt = 0
 
@@ -78,9 +82,9 @@ class McSppBase(object):
 
     def estimate_noisy_psd(self, y, alpha=0.92):
         # [F,C] *[F,C]->[F,C,C]
-        self.psd_yy = np.einsum('ij,il->ijl', y.conj(), y)
+        self.psd_yy = np.einsum('ij,il->ijl', y, y.conj())
         # smooth
-        self.Phi_yy = alpha * self.Phi_yy + (1 - alpha) * np.transpose(self.psd_yy, (1, 2, 0))
+        self.Phi_yy = alpha * self.Phi_yy + (1 - alpha) * self.psd_yy
 
         return self.Phi_yy
 
@@ -149,6 +153,28 @@ class McSppBase(object):
         self.G = np.maximum(np.minimum(self.G, 1), Gmin)
         self.G[:2] = 0
 
+    def compute_pmwf_weight(self, xi, Rxx, Rvv_inv, Gmin=0.0631, beta=1):
+        """compute parameterized multichannel non-causal Wiener filter
+        refer to
+            "On Optimal Frequency-Domain Multichannel Linear Filtering for Noise Reduction"
+
+        Parameters
+        ----------
+        xi : np.array, [half_bin]
+            prior snr
+        Rxx : np.array, [M, M, bin]
+            target psd matrix
+        Rvv_inv : np.array, [M, M, bin]
+            inversion of noise psd matrix
+        Gmin : float, optional
+            _description_, by default 0.0631
+        beta : int, optional
+            _description_, by default 1
+        """
+        u = np.zeros((self.half_bin, self.channels, 1))
+        u[:, 0, 0] = 1
+        self.w = (Rvv_inv @ Rxx @ u).squeeze() / (beta + xi[:, None])
+
     def smooth_psd(self, x, previous_x, win, alpha):
         """
         smooth spectrum in frequency and time
@@ -183,25 +209,24 @@ class McSppBase(object):
 
         self.Phi_xx = self.Phi_yy - self.Phi_vv
 
-        for k in range(self.half_bin):
-            # if self.frm_cnt < 10:
-            #     self.Phi_vv[:, :, k] = self.Phi_yy[:, :, k]
+        diag_bin = np.broadcast_to(self.diagonal_eps, (self.half_bin, self.channels, self.channels))
 
-            Phi_vv_inv = np.linalg.inv(np.real(self.Phi_vv[:, :, k]) + self.diagonal_eps)
-            # Phi_vv_inv = self.Phi_vv[:, :, k]
+        self.Phi_vv_inv.real = np.linalg.inv(self.Phi_vv.real + diag_bin)
 
-            self.xi[k] = np.trace(Phi_vv_inv @ np.real(self.Phi_yy[:, :, k])) - self.channels
+        self.xi = np.trace(self.Phi_vv_inv.real @ self.Phi_xx.real, axis1=-2, axis2=-1)
 
-            self.gamma[k] = np.real(
-                y[k : k + 1, :].conj() @ Phi_vv_inv @ np.real(self.Phi_xx[:, :, k]) @ Phi_vv_inv @ y[k : k + 1, :].T
-            )
+        self.gamma = (
+            y[:, None, :].conj() @ self.Phi_vv_inv.real @ self.Phi_xx.real @ self.Phi_vv_inv.real @ y[:, :, None]
+        ).real.squeeze()
 
         self.xi = np.minimum(np.maximum(self.xi, 1e-6), 1e6)
         self.gamma = np.minimum(np.maximum(self.gamma, 1e-6), 1e6)
 
         self.compute_q(y)
         self.compute_p(p_max=0.99, p_min=0.01)
-        self.update_noise_psd(y, beta=1.0)
+        self.update_noise_psd(y, psd_yy=self.psd_yy, beta=1.0)
+
+        self.compute_pmwf_weight(self.xi, self.Phi_xx, self.Phi_vv_inv)
 
         self.frm_cnt = self.frm_cnt + 1
 
@@ -221,15 +246,16 @@ class McSppBase(object):
         """
 
         self.alpha_tilde = self.alpha_d + (1 - self.alpha_d) * self.p  # eq 5,
+        # self.alpha_tilde[...] = 0.98
 
-        # eq.17 in [1]
+        # # eq.17 in [1]
         if psd_yy is not None:
-            self.Phi_vv = self.alpha_tilde * self.Phi_vv + beta * (1 - self.alpha_tilde) * np.transpose(
-                psd_yy, (1, 2, 0)
+            self.Phi_vv = (
+                self.alpha_tilde[:, None, None] * self.Phi_vv + beta * (1 - self.alpha_tilde[:, None, None]) * psd_yy
             )
         else:
             for k in range(self.half_bin):
-                self.Phi_vv[:, :, k] = self.alpha_tilde[k] * self.Phi_vv[:, :, k] + beta * (1 - self.alpha_tilde[k]) * (
+                self.Phi_vv[k] = self.alpha_tilde[k] * self.Phi_vv[k] + beta * (1 - self.alpha_tilde[k]) * (
                     y[k : k + 1, :].T @ y[k : k + 1, :].conj()
                 )
 
