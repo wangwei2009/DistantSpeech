@@ -29,6 +29,9 @@ class MicArray(object):
         self.freq_bin = np.linspace(0, self.half_bin - 1, self.half_bin)
         self.gamma = np.arange(0, 360, int(360 / self.M)) * np.pi / 180
 
+        self.tau = np.zeros((self.M, 1))
+        self.omega = 2 * np.pi * self.freq_bin * self.fs / self.n_fft
+
         self.array_sim = ArraySim(arrayType, spacing=r, M=M)
 
         self.array_type = arrayType
@@ -67,13 +70,73 @@ class MicArray(object):
         return self.mic_loc
 
     def steering_vector(self, look_direction=0):
-        omega = 2 * np.pi * self.freq_bin * self.fs / self.n_fft
+        """compute steer vector given look direction
+
+        Parameters
+        ----------
+        look_direction : int, optional
+            look direction, interval in [0, 360),by default 0
+
+        Returns
+        -------
+        np.array, [M, bin]
+            steer vector
+        """
+        # omega = 2 * np.pi * self.freq_bin * self.fs / self.n_fft
         a = np.zeros((self.M, self.half_bin), dtype=complex)
         for k in range(self.half_bin):
-            tau = compute_tau(mic_array=mic_array, incident_angle=np.array([look_direction, 0]) * np.pi / 180)
-            a[:, k : k + 1] = np.exp(-1j * omega[k] * tau)
+            # tau = np.random.randn(self.M, 1)
+            tau = self.compute_tau(incident_angle=np.array([look_direction, 0]) * np.pi / 180)
+            a[:, k : k + 1] = np.exp(-1j * self.omega[k] * tau)
 
         return a  # [M, half_bin]
+
+    def compute_tau(self, incident_angle):
+        """compute delay time between mic, use (0,0,0) as reference point bu default,
+        negative tau[m] indicates signal arrives at mic[m] in advance of zero point
+
+        Parameters
+        ----------
+        mic_array : MicArray
+            mic array object
+        incident_angle : np.array, [2] or [2,1]
+            source signal imping angle, must be radius
+
+        Returns
+        -------
+        tau: np.array, [M, 1]
+            delay time between mic
+
+        Examples
+        -------
+        >>> mic_array = MicArray(arrayType='linear', M=4)
+        >>> compute_tau(mic_array, np.array([30, 0]) / 180 * np.pi)
+        >>> print(tau)
+        [[ 0.024]
+        [ 0.008]
+        [-0.008]
+        [-0.024]]
+        """
+        az = incident_angle[0]
+        el = incident_angle[1] if len(incident_angle.shape) > 0 else 0
+        x0, y0, z0 = sph2cart(az, el, 1)
+
+        p0 = -1 * np.array([x0, y0, z0])  # unit-vector for impinging signal
+        p0 = p0[:, np.newaxis]
+        p0_norm = np.sqrt(p0.T @ p0)
+
+        c_inv = 1.0 / self.c
+        # mic_norm = -1 * np.sqrt(np.sum(self.mic_loc * self.mic_loc, axis=-1))  # [M, ]
+        for m in range(self.M):
+            mic_loc_m = -1 * self.mic_loc[m : m + 1, :]
+            mic_m_norm = np.sqrt(mic_loc_m @ mic_loc_m.T)
+            # mic_m_norm = mic_norm[m]
+            # cosine angle between impinging signal and mic_m
+            cos_theta = mic_loc_m @ p0 / (p0_norm * mic_m_norm + 1e-12)
+            # delay between impinging signal and mic_m
+            self.tau[m] = -1 * mic_m_norm * cos_theta * c_inv
+
+        return self.tau
 
 
 def compute_tau(mic_array: MicArray, incident_angle):
