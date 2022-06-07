@@ -34,7 +34,7 @@ class McSppBase(object):
         self.nfft = nfft
         self.half_bin = int(self.nfft / 2 + 1)
         self.lambda_d = np.zeros(self.half_bin)
-        self.alpha_d = 0.95
+        self.alpha_d = 0.92
 
         self.alpha = 0.92
 
