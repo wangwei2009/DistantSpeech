@@ -13,6 +13,7 @@ Multi-Channel Speech Presence Probability
 """
 
 import os
+from tkinter.messagebox import NO
 
 import numpy as np
 from scipy.signal import convolve
@@ -20,19 +21,39 @@ import soundfile as sf
 
 from DistantSpeech.noise_estimation import NoiseEstimationMCRA, MCRA2, McSppBase
 from DistantSpeech.beamformer.utils import load_pcm
+from DistantSpeech.noise_estimation import McMcraComplex, McMcra
+from DistantSpeech.beamformer.MicArray import MicArray
+
+EPSILON = np.finfo(np.float32).eps
+
+
+def condition_covariance(x, gamma):
+    """see https://stt.msu.edu/users/mauryaas/Ashwini_JPEN.pdf (2.3)"""
+    scale = gamma * np.trace(x) / x.shape[-1]
+    scaled_eye = np.eye(x.shape[-1]) * scale
+    return (x + scaled_eye) / (1 + gamma)
 
 
 class McSpp(McSppBase):
-    def __init__(self, nfft=256, channels=4) -> None:
+    def __init__(self, nfft=256, channels=4, mic_array=None) -> None:
         super().__init__(nfft=nfft, channels=channels)
 
-        # self.mcra = MCRA2(nfft=self.nfft)
+        self.mcra = NoiseEstimationMCRA(nfft=self.nfft)
+        # self.mcra = McMcra(nfft=nfft, channels=channels)
         self.mcra.L = 10
+        # self.mcra.init_frame = 50
 
-        self.w = np.zeros((self.channels, self.half_bin), dtype=complex)
         self.xi_last = np.zeros(self.half_bin)
+        self.Phi_vv_inv_bin = np.zeros((self.half_bin, self.channels, self.channels), dtype=complex)
 
         self.frm_cnt = 0
+
+        self.alpha_d = 0.92
+        self.alpha = 0.92
+
+        if mic_array is not None:
+            self.mic_array = mic_array
+            self.steer_vector = self.mic_array.steering_vector(look_direction=270)
 
     def estimate_psd(self, y, alpha):
         pass
@@ -42,6 +63,38 @@ class McSpp(McSppBase):
 
     def compute_prior_snr(self, y):
         pass
+
+    def compute_q(self, y: np.array, q_max=0.99, q_min=0.01):
+        """priori speech absence probability
+
+        Parameters
+        ----------
+        y : np.array, [bin, channel]
+            input signal
+        q_max : float, optional
+            max q, by default 0.99
+        q_min : float, optional
+            min q, by default 0.01
+
+        Returns
+        -------
+        np.array
+
+        """
+        self.mcra.estimation(np.abs(y[:, 0] * y[:, 0].conj()))
+
+        # self.q = np.sqrt(1 - self.mcra.p / 2)
+        self.q = np.sqrt(1 - self.mcra.p)
+        self.q = np.minimum(np.maximum(self.q, q_min), q_max)
+
+        if np.mean(self.q[8:32]) > 0.8:
+            self.q[:] = 0.99
+
+        # if self.frm_cnt > 800:
+        #     self.q[:] = 0.9999999
+        # else:
+        #     self.q[:] = self.mcra.q
+        # self.q[:] = self.mcra.q[:]
 
     def compute_q_local(self, y, Phi_vv_inv, Phi_yy, k, q_max=0.99, q_min=0.01):
         # eq.10,
@@ -62,7 +115,16 @@ class McSpp(McSppBase):
     def compute_weight_k(self, xi, Rxx, Rvv_inv, k, Gmin=0.0631, beta=1):
         u = np.zeros((self.channels, 1))
         u[0, 0] = 1
-        self.w[:, k : k + 1] = Rvv_inv @ Rxx @ u / (beta + xi)
+        w = Rvv_inv @ Rxx @ u / (beta + xi)
+        self.w[k : k + 1, :] = w.T
+
+    def compute_weight_from_steer_vector(self, xi, Rxx, Rvv_inv, k, Gmin=0.0631, beta=1):
+        w = (
+            Rvv_inv
+            @ self.steer_vector[:, k : k + 1]
+            / (self.steer_vector[:, k : k + 1].conj().T @ Rvv_inv @ self.steer_vector[:, k : k + 1])
+        )
+        self.w[:, k : k + 1] = w.T
 
     def smooth_psd(self, x, previous_x, win, alpha):
         """
@@ -84,36 +146,46 @@ class McSpp(McSppBase):
 
         return smoothed_x
 
-    def estimation_core(self, y, psd_yy=None, diag_value=1e-8):
+    def check_data(self, Phi_xx, diag_value=1e-8):
         diag = np.eye(self.channels) * diag_value
+        diag_bin = np.broadcast_to(diag, (self.half_bin, self.channels, self.channels))
+        for k in range(self.half_bin):
+            if (np.diag(self.Phi_xx[k]) < 0).any():
+                self.Phi_vv[k] = self.Phi_yy[k] - diag_bin[k] * 2
+                self.Phi_xx[k] = diag_bin[k]
+                self.Phi_vv_inv[k] = np.linalg.inv(self.Phi_yy[k] + diag_bin[k])
+
         self.Phi_xx = self.Phi_yy - self.Phi_vv
 
+        xx = np.trace(self.Phi_xx, axis1=-2, axis2=-1).real
+        index = np.where(xx < 1e-1)
+        self.Phi_vv[index] = self.Phi_yy[index] - diag_bin[index] * 2
+        self.Phi_xx[index] = diag_bin[index]
+
+        return self.Phi_xx
+
+    def estimation_core(self, y, psd_yy=None, diag_value=1e-8):
+        diag = np.eye(self.channels) * diag_value
         diag_bin = np.broadcast_to(diag, (self.half_bin, self.channels, self.channels))
 
-        Phi_vv_inv_bin = np.linalg.inv(np.transpose(self.Phi_vv, (2, 0, 1)) + diag_bin)
+        self.Phi_xx = self.Phi_yy - self.Phi_vv
 
-        for k in range(self.half_bin):
+        self.Phi_vv_inv = np.linalg.inv(self.Phi_vv + diag_bin)
 
-            Phi_vv_inv = Phi_vv_inv_bin[k, :, :]
+        self.xi = np.abs(np.trace(self.Phi_vv_inv @ self.Phi_xx, axis1=-2, axis2=-1))
+        index = np.where(self.xi < 0)
+        self.Phi_vv_inv[index] = np.linalg.inv(self.Phi_yy[index] + diag_bin[index])
+        self.xi = np.minimum(np.maximum(self.xi, 1e-6), 1e8)
 
-            self.xi[k] = np.real(np.trace(Phi_vv_inv @ self.Phi_xx[:, :, k]))
-            if self.frm_cnt > 1:
-                if self.xi[k] < 1e-6:
-                    self.xi[k] = self.xi_last[k]
-
-            self.xi[k] = np.minimum(np.maximum(self.xi[k], 1e-6), 1e8)
-
-            self.gamma[k] = np.abs(
-                y[k : k + 1, :].conj() @ Phi_vv_inv @ self.Phi_xx[:, :, k] @ Phi_vv_inv @ y[k : k + 1, :].T
-            )
-            self.gamma[k] = np.minimum(np.maximum(self.gamma[k], 1e-6), 1e8)
-
-            self.compute_weight_k(self.xi[k], self.Phi_xx[:, :, k], Phi_vv_inv, k, beta=1)
+        self.gamma = (
+            y[:, None, :].conj() @ self.Phi_vv_inv @ self.Phi_xx @ self.Phi_vv_inv @ y[:, :, None]
+        ).real.squeeze()
+        self.gamma = np.minimum(np.maximum(self.gamma, 1e-6), 1e8)
 
         self.compute_p(alpha_p=0)
-        self.update_noise_psd(y, psd_yy=psd_yy, beta=1.0)
+        # self.update_noise_psd(y, psd_yy=psd_yy, beta=1.0)
 
-    def estimation(self, y, diag=1e-4, repeat=False):
+    def estimation(self, y, diag_value=1e-4, repeat=False):
         """mcspp estimation function
 
         Parameters
@@ -123,14 +195,14 @@ class McSpp(McSppBase):
         """
 
         M = self.channels
-        diag_value = np.eye(M) * diag
+        diag_value = np.eye(M) * diag_value
 
         psd_yy = np.einsum('ij,il->ijl', y, y.conj())
 
-        self.Phi_yy = self.alpha * self.Phi_yy + (1 - self.alpha) * np.transpose(psd_yy, (1, 2, 0))
+        self.Phi_yy = self.alpha * self.Phi_yy + (1 - self.alpha) * psd_yy
 
         self.compute_q(y, q_max=0.99, q_min=1e-2)
-        self.q = np.sqrt(np.sqrt(self.q))
+        # self.q = np.sqrt(np.sqrt(self.q))
         # self.q = self.q / 2
 
         # self.p = np.sqrt(1 - self.q)
@@ -139,10 +211,13 @@ class McSpp(McSppBase):
             self.Phi_vv = self.Phi_yy
             self.q[:] = 0.99
 
-        self.estimation_core(y, psd_yy=psd_yy, diag_value=1e-8)
+        self.estimation_core(y, psd_yy=psd_yy, diag_value=diag_value)
+        self.update_noise_psd(y, psd_yy=psd_yy, beta=1.0)
         if repeat:
-            self.q = np.sqrt(1 - self.p)
-            self.estimation_core(y, psd_yy=psd_yy, diag_value=1e-8)
+            # self.q = np.sqrt(1 - self.p)
+            self.estimation_core(y, psd_yy=psd_yy, diag_value=diag_value)
+
+        self.compute_pmwf_weight(self.xi, self.Phi_xx, self.Phi_vv_inv, beta=1)
 
         self.xi_last[:] = self.xi  # .copy()
 
