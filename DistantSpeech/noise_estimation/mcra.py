@@ -26,6 +26,12 @@ class NoiseEstimationMCRA(NoiseEstimationBase):
 
     def estimation(self, Y: np.ndarray):
 
+        if Y.dtype == 'complex':
+            Y = np.abs(Y) ** 2
+
+        if len(Y.shape) > 1:
+            Y = Y[:, 0]
+
         assert len(Y) == self.half_bin
 
         for k in range(self.half_bin - 1):
