@@ -53,8 +53,9 @@ class MCRA2(NoiseEstimationBase):
                 else:
                     I = 0
 
-                self.p[k] = self.alpha_p * self.p[k] + (
-                            1 - self.alpha_p) * I  # eq 14,updata speech presence probability
+                self.p[k] = (
+                    self.alpha_p * self.p[k] + (1 - self.alpha_p) * I
+                )  # eq 14,updata speech presence probability
                 self.p[k] = max(min(self.p[k], 1.0), 0.0)
 
         self.frm_cnt = self.frm_cnt + 1
@@ -72,7 +73,7 @@ def main(args):
     import librosa
 
     filepath = "../../example/test_audio/rec1/"
-    x, sr = load_wav(os.path.abspath(filepath))      # [channel,samples]
+    x, sr = load_wav(os.path.abspath(filepath))  # [channel,samples]
 
     sr = 16000
     r = 0.032
