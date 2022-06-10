@@ -181,7 +181,17 @@ def compute_tau(mic_array: MicArray, incident_angle):
 
 
 if __name__ == "__main__":
-    mic_array = MicArray(arrayType='linear', M=4)
+    M = 4
+    c = 343
+    r = 0.032
+    mic_array = MicArray(arrayType='circular', M=4)
     print(mic_array.mic_loc)
-    tau = compute_tau(mic_array, np.array([30, 0]) / 180 * np.pi)
+    tau = compute_tau(mic_array, np.array([0, 0]) / 180 * np.pi)
     print(tau * mic_array.c)
+    print((tau[-1] - tau[0]) * c)
+    print((M - 1) * r / 2)
+    print(np.abs((tau[-1] - tau[0]) * c - (M - 1) * r / 2))
+    print(np.linalg.norm(mic_array.mic_loc[0] - mic_array.mic_loc[1]))
+    print((tau[0] - tau[1]) * c + r)
+    print((tau[0] * c))
+    print(tau[1])
