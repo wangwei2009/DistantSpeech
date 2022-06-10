@@ -17,6 +17,7 @@ from math import gamma
 import os
 
 import numpy as np
+from scipy.linalg import eigh
 from scipy.signal import convolve
 import soundfile as sf
 from pesq import pesq
@@ -114,8 +115,8 @@ class McSppBase(object):
 
         self.mcra.estimation(np.abs(y[:, 0] * np.conj(y[:, 0])))
 
-        self.q = np.sqrt(1 - self.mcra.p / 2)
-        # self.q = np.sqrt(1 - self.mcra.p)
+        # self.q = np.sqrt(1 - self.mcra.p / 2)
+        self.q = np.sqrt(1 - self.mcra.p)
         self.q = np.minimum(np.maximum(self.q, q_min), q_max)
 
         return self.q
@@ -152,6 +153,69 @@ class McSppBase(object):
         self.G = np.power(self.G_H1, p) * np.power(Gmin, (1 - p))
         self.G = np.maximum(np.minimum(self.G, 1), Gmin)
         self.G[:2] = 0
+
+    def blind_analytic_normalization(self, vector, noise_psd_matrix, eps=0):
+        """Reduces distortions in beamformed ouptput.
+
+        :param vector: Beamforming vector
+            with shape (..., sensors)
+        :param noise_psd_matrix:
+            with shape (..., sensors, sensors)
+        :return: Scaled Deamforming vector
+            with shape (..., sensors)
+
+        >>> vector = np.random.normal(size=(5, 6)).view(np.complex128)
+        >>> vector.shape
+        (5, 3)
+        >>> noise_psd_matrix = np.random.normal(size=(5, 3, 6)).view(np.complex128)
+        >>> noise_psd_matrix = noise_psd_matrix + noise_psd_matrix.swapaxes(-2, -1)
+        >>> noise_psd_matrix.shape
+        (5, 3, 3)
+        >>> w1 = blind_analytic_normalization_legacy(vector, noise_psd_matrix)
+        >>> w2 = blind_analytic_normalization(vector, noise_psd_matrix)
+        >>> np.testing.assert_allclose(w1, w2)
+
+        """
+        nominator = np.einsum('...a,...ab,...bc,...c->...', vector.conj(), noise_psd_matrix, noise_psd_matrix, vector)
+        nominator = np.abs(np.sqrt(nominator))
+
+        denominator = np.einsum('...a,...ab,...b->...', vector.conj(), noise_psd_matrix, vector)
+        denominator = np.abs(denominator)
+
+        normalization = nominator / (denominator + eps)
+        return vector * normalization[..., np.newaxis]
+
+    def phase_correction(self, vector):
+        """Phase correction to reduce distortions due to phase inconsistencies.
+        Args:
+            vector: Beamforming vector with shape (..., bins, sensors).
+        Returns: Phase corrected beamforming vectors. Lengths remain.
+        """
+        w = vector.copy()
+        F, D = w.shape
+        for f in range(1, F):
+            w[f, :] *= np.exp(-1j * np.angle(np.sum(w[f, :] * w[f - 1, :].conj(), axis=-1, keepdims=True)))
+        return w
+
+    def get_gev_vector(self, target_psd_matrix, noise_psd_matrix):
+        """
+        Returns the GEV beamforming vector.
+        :param target_psd_matrix: Target PSD matrix
+            with shape (bins, sensors, sensors)
+        :param noise_psd_matrix: Noise PSD matrix
+            with shape (bins, sensors, sensors)
+        :return: Set of beamforming vectors with shape (bins, sensors)
+        """
+        bins, sensors, _ = target_psd_matrix.shape
+        beamforming_vector = np.empty((bins, sensors), dtype=np.complex)
+        for f in range(bins):
+            try:
+                eigenvals, eigenvecs = eigh(target_psd_matrix[f, :, :], noise_psd_matrix[f, :, :])
+                beamforming_vector[f, :] = eigenvecs[:, -1]
+            except np.linalg.LinAlgError:
+                print('LinAlg error for frequency {}'.format(f))
+                beamforming_vector[f, :] = np.ones((sensors,)) / np.trace(noise_psd_matrix[f]) * sensors
+        return beamforming_vector
 
     def compute_pmwf_weight(self, xi, Rxx, Rvv_inv, Gmin=0.0631, beta=1):
         """compute parameterized multichannel non-causal Wiener filter
