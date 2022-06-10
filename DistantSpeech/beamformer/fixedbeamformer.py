@@ -9,9 +9,7 @@ import warnings
 class FixedBeamformer(beamformer):
     def __init__(self, MicArray, frameLen=256, hop=None, nfft=None, c=343, fs=16000):
 
-        beamformer.__init__(
-            self, MicArray, frame_len=frameLen, hop=hop, nfft=nfft, c=c, fs=fs
-        )
+        beamformer.__init__(self, MicArray, frame_len=frameLen, hop=hop, nfft=nfft, c=c, fs=fs)
         self.angle = np.array([197, 0]) / 180 * np.pi
         self.gamma = MicArray.gamma
         self.window = windows.hann(self.frameLen, sym=False)
@@ -91,3 +89,33 @@ class FixedBeamformer(beamformer):
             beampattern = self.beampattern(self.omega, self.H)
 
         return {"data": yout, "WNG": WNG, "DI": DI, "beampattern": beampattern}
+
+
+if __name__ == "__main__":
+    sr = 16000
+    r = 0.032
+    c = 343
+
+    frameLen = 256
+    hop = frameLen / 2
+    overlap = frameLen - hop
+    nfft = 256
+    c = 340
+    r = 0.032
+    fs = sr
+
+    MicArrayObj = MicArray(arrayType="circular", r=0.032, M=4)
+    angle = np.array([197, 0]) / 180 * np.pi
+
+    fixedbeamformerObj = FixedBeamformer(MicArrayObj, frameLen, hop, nfft, c, fs)
+
+    x = np.random.rand(16000 * 5)
+
+    # """
+    # fixed beamformer precesing function
+    # method:
+    # 'DS':   delay-and-sum beamformer
+    # 'MVDR': MVDR beamformer under isotropic noise field
+    #
+    # """
+    yout = fixedbeamformerObj.process(x, angle, method=2, retH=True, retWNG=True, retDI=True)

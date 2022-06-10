@@ -17,7 +17,9 @@ from DistantSpeech.beamformer.beamformer import beamformer
 from DistantSpeech.beamformer.utils import load_audio as audioread
 from DistantSpeech.beamformer.utils import save_audio as audiowrite
 from DistantSpeech.beamformer.utils import visual
+from DistantSpeech.noise_estimation.mcspp_base import McSppBase
 from DistantSpeech.transform.transform import Transform
+from DistantSpeech.noise_estimation import McSpp
 
 
 class DelayObj(object):
@@ -39,7 +41,7 @@ class DelayObj(object):
 
         self.buffer[:, -data_len:] = x
         output = self.buffer[:, :data_len].copy()
-        self.buffer[:, :self.n_delay] = self.buffer[:, -self.n_delay:]
+        self.buffer[:, : self.n_delay] = self.buffer[:, -self.n_delay :]
 
         return output
 
@@ -66,7 +68,7 @@ class FDGSC(beamformer):
 
         self.bm = []
         for m in range(self.M):
-            self.bm.append(FastFreqLms(filter_len=frameLen, mu=0.1, alpha=0.8))
+            self.bm.append(FastFreqLms(filter_len=frameLen, mu=0.01, alpha=0.8))
 
         self.aic_filter = FastFreqLms(filter_len=frameLen, n_channels=self.M, mu=0.1, alpha=0.8)
 
@@ -74,18 +76,23 @@ class FDGSC(beamformer):
 
         self.delay_obj_bm = DelayObj(self.frameLen, 8, channel=self.M)
 
+        # self.spp = McSpp(nfft=nfft, channels=self.M)
+        self.spp = McSppBase(nfft=nfft, channels=self.M)
+        self.transform = Transform(n_fft=512, hop_length=256, channel=self.M)
+        self.spp.mcra.L = 10
+
     def fixed_delay(self):
         pass
 
     def fixed_beamformer(self, x):
         """
-        
+
         :param x: input signal, (n_chs, frame_len)
-        :return: 
+        :return:
         """
         return np.mean(x, axis=0, keepdims=True)
 
-    def bm(self, x):
+    def blocking_matrix(self, x):
         """
 
         :param x: (n_chs, frame_len)
@@ -120,11 +127,17 @@ class FDGSC(beamformer):
         # overlaps-save approach, no need to use hop_size
         frameNum = int((x.shape[1]) / self.frameLen)
 
-        for n in range(frameNum):
-            x_n = x[:, n * self.frameLen:(n + 1) * self.frameLen]
+        p = np.zeros((self.half_bin, frameNum))
 
-            bm_update = True if n < int(550000 / self.frameLen) else False
-            aic_update = True if n > int(550000 / self.frameLen) else False
+        D = self.transform.stft(np.transpose(x))
+
+        for n in range(frameNum):
+            x_n = x[:, n * self.frameLen : (n + 1) * self.frameLen]
+
+            p[:, n] = self.spp.estimation(D[:, n, :])
+
+            # bm_update = True if n < int(550000 / self.frameLen) else False
+            # aic_update = True if n > int(550000 / self.frameLen) else False
 
             # fixed beamformer path
             fixed_output = self.fixed_beamformer(x_n)
@@ -133,19 +146,23 @@ class FDGSC(beamformer):
 
             # adaptive block matrix
             for m in range(self.M):
-                bm_output_n, _ = self.bm[m].update(fixed_output.T, lower_path_delayed[m, :], update=bm_update)
-                bm_output[n * self.frameLen:(n + 1) * self.frameLen, m] = np.squeeze(bm_output_n)
+                bm_output_n, _ = self.bm[m].update(fixed_output.T, lower_path_delayed[m, :], update=False, p=p[:, n])
+                bm_output[n * self.frameLen : (n + 1) * self.frameLen, m] = np.squeeze(bm_output_n)
 
             # fix delay
             fixed_output = self.delay_obj.delay(fixed_output)
 
             # AIC block
-            output_n, _ = self.aic_filter.update(bm_output[n * self.frameLen:(n + 1) * self.frameLen, :],
-                                                 fixed_output.T, update=aic_update)
+            output_n, _ = self.aic_filter.update(
+                bm_output[n * self.frameLen : (n + 1) * self.frameLen, :],
+                fixed_output.T,
+                update=True,
+                p=1,
+            )
 
-            output[n * self.frameLen:(n + 1) * self.frameLen] = np.squeeze(output_n)
+            output[n * self.frameLen : (n + 1) * self.frameLen] = np.squeeze(output_n)
 
-        return output
+        return output, p
 
 
 def main(args):
@@ -189,6 +206,7 @@ def main(args):
 
 def test_delay():
     from matplotlib import pyplot as plt
+
     t = np.arange(8000) / 1000.0
     f = 1000
     fs = 1000
@@ -203,7 +221,7 @@ def test_delay():
     output = np.zeros(len(x))
 
     for n in range(n_frame):
-        output[n * buffer_len:(n + 1) * buffer_len] = delay_obj.delay(x[n * buffer_len:(n + 1) * buffer_len])
+        output[n * buffer_len : (n + 1) * buffer_len] = delay_obj.delay(x[n * buffer_len : (n + 1) * buffer_len])
 
     plt.figure()
     plt.plot(x)
