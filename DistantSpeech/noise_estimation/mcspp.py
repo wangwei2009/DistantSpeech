@@ -34,6 +34,16 @@ def condition_covariance(x, gamma):
     return (x + scaled_eye) / (1 + gamma)
 
 
+def condition_covariance_bin(x, gamma):
+    half_bin, M, M = x.shape
+    for k in range(half_bin):
+        scale = gamma * np.trace(x[k]) / x[k].shape[-1]
+        scaled_eye = np.eye(x[k].shape[-1]) * scale
+        x[k] = (x[k] + scaled_eye) / (1 + gamma)
+
+    return x
+
+
 class McSpp(McSppBase):
     def __init__(self, nfft=256, channels=4, mic_array=None) -> None:
         super().__init__(nfft=nfft, channels=channels)
@@ -53,7 +63,7 @@ class McSpp(McSppBase):
 
         if mic_array is not None:
             self.mic_array = mic_array
-            self.steer_vector = self.mic_array.steering_vector(look_direction=270)
+            self.steer_vector = self.mic_array.steering_vector(look_direction=30)
 
     def estimate_psd(self, y, alpha):
         pass
@@ -63,6 +73,22 @@ class McSpp(McSppBase):
 
     def compute_prior_snr(self, y):
         pass
+
+    def compute_p(self, p_max=1.0, p_min=0.0, alpha_p=0):
+        """compute posterior speech presence probability
+
+        Parameters
+        ----------
+        p_max : float, optional
+            max p, by default 1.0
+        p_min : float, optional
+            min p, by default 0.0
+        alpha_p : int, optional
+            average factor, by default 0 indicate no average
+        """
+        p = 1 / (1 + self.q / (1 - self.q) * (1 + self.xi) * np.exp(-1 * (self.gamma / (1 + self.xi))))
+        self.p = alpha_p * self.p + (1 - alpha_p) * p
+        self.p = np.minimum(np.maximum(self.p, p_min), p_max)
 
     def compute_q(self, y: np.array, q_max=0.99, q_min=0.01):
         """priori speech absence probability
@@ -88,7 +114,7 @@ class McSpp(McSppBase):
         self.q = np.minimum(np.maximum(self.q, q_min), q_max)
 
         if np.mean(self.q[8:32]) > 0.8:
-            self.q[:] = 0.99
+            self.q[:] = 0.999999
 
         # if self.frm_cnt > 800:
         #     self.q[:] = 0.9999999
@@ -124,7 +150,10 @@ class McSpp(McSppBase):
             @ self.steer_vector[:, k : k + 1]
             / (self.steer_vector[:, k : k + 1].conj().T @ Rvv_inv @ self.steer_vector[:, k : k + 1])
         )
-        self.w[:, k : k + 1] = w.T
+        # print(w.shape)
+        self.w[k : k + 1, :] = w.T
+
+        return w
 
     def smooth_psd(self, x, previous_x, win, alpha):
         """
@@ -168,19 +197,40 @@ class McSpp(McSppBase):
         diag = np.eye(self.channels) * diag_value
         diag_bin = np.broadcast_to(diag, (self.half_bin, self.channels, self.channels))
 
+        # self.Phi_vv = condition_covariance(self.Phi_vv, 1e-6)
+        # self.Phi_vv = condition_covariance_bin(self.Phi_vv, 1e-6)
+
+        # Make sure matrix is hermitian
+        self.Phi_vv = 0.5 * (self.Phi_vv + np.conj(self.Phi_vv.swapaxes(-1, -2)))
+
         self.Phi_xx = self.Phi_yy - self.Phi_vv
 
         self.Phi_vv_inv = np.linalg.inv(self.Phi_vv + diag_bin)
 
-        self.xi = np.abs(np.trace(self.Phi_vv_inv @ self.Phi_xx, axis1=-2, axis2=-1))
+        # self.xi = np.trace(self.Phi_vv_inv @ self.Phi_xx, axis1=-2, axis2=-1).real
+        self.xi = np.trace(np.real(self.Phi_vv_inv @ self.Phi_yy), axis1=-2, axis2=-1) - self.channels
+        if self.frm_cnt == 1164:
+            print('xi[58,1164] = {}'.format(self.xi[58]))
         index = np.where(self.xi < 0)
-        self.Phi_vv_inv[index] = np.linalg.inv(self.Phi_yy[index] + diag_bin[index])
+        # self.Phi_vv_inv[index] = np.linalg.inv(self.Phi_yy[index] + diag_bin[index])
+
+        if self.frm_cnt < 5:
+            self.Phi_vv_inv[index] = np.linalg.inv(self.Phi_yy[index] + diag_bin[index])
+        else:
+            self.Phi_vv_inv[index] = np.linalg.inv(self.Phi_yy[index])
+        # self.Phi_vv[index] = self.Phi_yy[index]
+        self.xi = np.trace(np.real(self.Phi_vv_inv @ self.Phi_yy), axis1=-2, axis2=-1) - self.channels
+
         self.xi = np.minimum(np.maximum(self.xi, 1e-6), 1e8)
 
         self.gamma = (
-            y[:, None, :].conj() @ self.Phi_vv_inv @ self.Phi_xx @ self.Phi_vv_inv @ y[:, :, None]
+            y[:, None, :].conj() @ self.Phi_vv_inv @ self.Phi_yy @ self.Phi_vv_inv @ y[:, :, None]
+            - y[:, None, :].conj() @ self.Phi_vv_inv @ y[:, :, None]
         ).real.squeeze()
         self.gamma = np.minimum(np.maximum(self.gamma, 1e-6), 1e8)
+
+        # index = np.where(self.gamma / self.xi > 20)
+        # self.gamma[index] = self.xi[index] * 20
 
         self.compute_p(alpha_p=0)
         # self.update_noise_psd(y, psd_yy=psd_yy, beta=1.0)
@@ -217,7 +267,20 @@ class McSpp(McSppBase):
             # self.q = np.sqrt(1 - self.p)
             self.estimation_core(y, psd_yy=psd_yy, diag_value=diag_value)
 
-        self.compute_pmwf_weight(self.xi, self.Phi_xx, self.Phi_vv_inv, beta=1)
+        self.compute_pmwf_weight(self.xi, self.Phi_xx, self.Phi_vv_inv, beta=10)
+        # for k in range(self.half_bin):
+        #     self.compute_weight_from_steer_vector(self.xi, self.Phi_xx, self.Phi_vv_inv[k], k)
+
+        # diag = np.eye(self.channels) * diag_value
+        # diag_bin = np.broadcast_to(diag, (self.half_bin, self.channels, self.channels))
+
+        # noise_psd_matrix = condition_covariance(self.Phi_vv, 1e-6)
+        # noise_psd_matrix /= np.trace(noise_psd_matrix, axis1=-2, axis2=-1)[..., None, None]
+        # self.w = self.get_gev_vector(self.Phi_xx, noise_psd_matrix)
+        # self.w = self.phase_correction(self.w)
+        # self.w = self.blind_analytic_normalization(self.w, noise_psd_matrix)
+        # if normalization:
+        #     W_gev = blind_analytic_normalization(W_gev, noise_psd_matrix)
 
         self.xi_last[:] = self.xi  # .copy()
 
