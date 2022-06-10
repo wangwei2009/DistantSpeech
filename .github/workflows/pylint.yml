@@ -34,4 +34,5 @@ jobs:
     - name: Generate docs
       run: |
           cd docs
+          sphinx-apidoc -o ./source ../DistantSpeech -f -e
           make html
