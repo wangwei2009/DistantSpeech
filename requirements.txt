@@ -20,7 +20,6 @@ Cython==0.29.28
 debugpy==1.6.0
 decorator==5.1.1
 defusedxml==0.7.1
--e git+https://github.com/wangwei2009/DistantSpeech.git@ee3fbfda7153c8586462f14e09f10ab8f3e4fbd1#egg=DistantSpeech
 entrypoints==0.4
 executing==0.8.3
 fastjsonschema==2.15.3
