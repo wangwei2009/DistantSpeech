@@ -98,7 +98,7 @@ class McMcra(McSppBase):
         elif self.psi_tilde[k] < self.M:
             self.q_local[k] = q_max
         else:
-            self.q_local[k] = (self.psi_tilde_0 - self.psi_tilde[k])/(self.psi_tilde_0 - self.M)
+            self.q_local[k] = (self.psi_tilde_0 - self.psi_tilde[k]) / (self.psi_tilde_0 - self.M)
 
             self.q_local[k] = np.minimum(np.maximum(self.q_local[k], q_min), q_max)
 
@@ -119,22 +119,24 @@ class McMcra(McSppBase):
         self.psi_global = self.smooth_psd(self.psi, self.psi_global, self.win, 0)
         frame_range = np.array([60, 2000])
         frame_range = frame_range * self.nfft / 16000
-        psi_frame = np.mean(self.psi_global[int(frame_range[0]):int(frame_range[1])])
+        psi_frame = np.mean(self.psi_global[int(frame_range[0]) : int(frame_range[1])])
         self.psi_frame.append(psi_frame)
         for k in range(self.half_bin):
             if self.psi_global[k] < self.psi_0:
                 self.q_global[k] = self.q_max
             else:
                 self.q_global[k] = self.q_min
-        if psi_frame < self.psi_0/8:
+        if psi_frame < self.psi_0 / 8:
             q_frame = self.q_max
         else:
             q_frame = self.q_min
 
         # self.q_frame.append(q_frame)
 
+        # self.q = self.q_local * q_frame
         # self.q = self.q_local * self.q_global * q_frame
         self.q = self.q_local
+        # self.q[:] = self.q_local * q_frame
 
         return self.q
 
@@ -154,7 +156,6 @@ class McMcra(McSppBase):
         self.G = np.maximum(np.minimum(self.G, 1), Gmin)
         self.G[:2] = 0
 
-
     def smooth_psd(self, x, previous_x, win, alpha):
         """
         smooth spectrum in frequency and time
@@ -168,7 +169,7 @@ class McMcra(McSppBase):
 
         # smoothing in frequency
         smoothed_f = convolve(x, win)
-        smoothed_f_val = smoothed_f[int((w - 1) / 2):int(-((w - 1) / 2))]
+        smoothed_f_val = smoothed_f[int((w - 1) / 2) : int(-((w - 1) / 2))]
 
         # smoothing in time
         smoothed_x = alpha * previous_x + (1 - alpha) * smoothed_f_val
@@ -178,23 +179,26 @@ class McMcra(McSppBase):
     def estimation(self, y):
 
         for k in range(self.half_bin):
-            self.Phi_yy[:, :, k] = self.alpha * self.Phi_yy[:, :, k] + (1 - self.alpha) * \
-                                   np.real((np.conj(y[k:k+1, :]).transpose() @ y[k:k+1, :]))
+            self.Phi_yy[:, :, k] = self.alpha * self.Phi_yy[:, :, k] + (1 - self.alpha) * np.real(
+                (np.conj(y[k : k + 1, :]).transpose() @ y[k : k + 1, :])
+            )
 
             if self.frm_cnt < 5:
                 self.Phi_vv[:, :, k] = self.Phi_yy[:, :, k]
 
             self.Phi_xx = self.Phi_yy - self.Phi_vv
 
-            Phi_vv_inv = np.linalg.inv(self.Phi_vv[:, :, k] + np.eye(self.channels)*1e-6)
+            Phi_vv_inv = np.linalg.inv(self.Phi_vv[:, :, k] + np.eye(self.channels) * 1e-6)
 
             self.xi[k] = np.trace(Phi_vv_inv @ self.Phi_yy[:, :, k]) - self.channels
-            self.xi[k] = np.minimum(np.maximum(self.xi[k], 1e-6), 100.0)
+            self.xi[k] = np.minimum(np.maximum(self.xi[k], 1e-6), 1e6)
 
-            self.gamma[k] = np.real(y[k:k+1, :] @ Phi_vv_inv @ self.Phi_xx[:, :, k] @ Phi_vv_inv @ np.conj(y[k:k+1, :]).transpose())
-            self.gamma[k] = np.minimum(np.maximum(self.gamma[k], 1e-6), 1000.0)
+            self.gamma[k] = np.real(
+                y[k : k + 1, :].conj() @ Phi_vv_inv @ self.Phi_xx[:, :, k] @ Phi_vv_inv @ y[k : k + 1, :].T
+            )
+            self.gamma[k] = np.minimum(np.maximum(self.gamma[k], 1e-6), 1e6)
 
-            self.q_local[k] = self.compute_q_local(y[k:k + 1, :], Phi_vv_inv, self.Phi_yy[:, :, k], k)
+            self.q_local[k] = self.compute_q_local(y[k : k + 1, :], Phi_vv_inv, self.Phi_yy[:, :, k], k)
 
         self.compute_q(y)
         self.compute_p(p_max=0.99, p_min=0.01)
@@ -214,8 +218,10 @@ class McMcra(McSppBase):
 
         # eq.17 in [1]
         for k in range(self.half_bin):
-            self.Phi_vv[:, :, k] = np.real(self.alpha_tilde[k] * self.Phi_vv[:, :, k] + beta *
-                                           (1 - self.alpha_tilde[k]) * (np.conj(y[k:k+1, :]).transpose() @ y[k:k+1, :]))
+            self.Phi_vv[:, :, k] = np.real(
+                self.alpha_tilde[k] * self.Phi_vv[:, :, k]
+                + beta * (1 - self.alpha_tilde[k]) * (np.conj(y[k : k + 1, :]).transpose() @ y[k : k + 1, :])
+            )
 
 
 def main(args):
@@ -226,12 +232,14 @@ def main(args):
     import time
     from scipy.io import wavfile
 
-    filepath = "../../example/test_audio/rec1/"              # [u1,u2,u3,y]
+    filepath = "example/test_audio/rec1/"  # [u1,u2,u3,y]
     # filepath = "./test_audio/rec1_mcra_gsc/"     # [y,u1,u2,u3]
     x, sr = load_wav(os.path.abspath(filepath))  # [channel, samples]
     sr = 16000
     r = 0.032
     c = 343
+
+    x, sr = librosa.load('/home/wangwei/work/DistantSpeech/example/test_audio/sim/mix3/mix.wav', sr=None, mono=False)
 
     frameLen = 256
     hop = frameLen / 2
@@ -246,7 +254,7 @@ def main(args):
 
     transform = Transform(n_fft=512, hop_length=256, channel=channel)
 
-    D = transform.stft(x.transpose())     # [F,T,Ch]
+    D = transform.stft(x.transpose())  # [F,T,Ch]
     Y, _ = transform.magphase(D, 2)
     print(Y.shape)
     pmesh(librosa.power_to_db(Y[:, :, -1]))
@@ -282,15 +290,17 @@ def main(args):
 
         nsy = wave_data[:, 0]
         enh = y[256:]
-        nsy = nsy[:len(enh)]
-        ref = ref[:len(enh)]
+        nsy = nsy[: len(enh)]
+        ref = ref[: len(enh)]
 
-        summary = {'ref_pesq': pesq(sr, ref, nsy, 'wb'),
-                   'enh_pesq': pesq(sr, ref, enh, 'wb'),
-                   'ref_stoi': stoi(ref, nsy, sr, extended=False),
-                   'enh_stoi': stoi(ref, enh, sr, extended=False),
-                   'ref_estoi': stoi(ref, nsy, sr, extended=True),
-                   'enh_estoi': stoi(ref, enh, sr, extended=True)}
+        summary = {
+            'ref_pesq': pesq(sr, ref, nsy, 'wb'),
+            'enh_pesq': pesq(sr, ref, enh, 'wb'),
+            'ref_stoi': stoi(ref, nsy, sr, extended=False),
+            'enh_stoi': stoi(ref, enh, sr, extended=False),
+            'ref_estoi': stoi(ref, nsy, sr, extended=True),
+            'enh_estoi': stoi(ref, enh, sr, extended=True),
+        }
         for key in summary.keys():
             print('{}:{}'.format(key, summary[key]))
 
@@ -299,6 +309,7 @@ def main(args):
 
     pmesh(p)
     plt.savefig('p.png')
+    np.save('q.npz', mcspp.q)
 
     plt.plot(y)
     plt.show()
@@ -306,11 +317,12 @@ def main(args):
     # save audio
     if args.save:
         audio = (y * np.iinfo(np.int16).max).astype(np.int16)
-        wavfile.write('output/output_mc_mcra.wav', 16000, audio)
+        wavfile.write('output/output_mc_mcra2.wav', 16000, audio)
 
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="Neural Feature Extractor")
     parser.add_argument("-l", "--listen", action='store_true', help="set to listen output")  # if set true
     parser.add_argument("-s", "--save", action='store_true', help="set to save output")  # if set true
