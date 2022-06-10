@@ -26,6 +26,8 @@ class NoiseEstimationBase(object):
 
         self.L = 125
 
+        self.init_frame = 15
+
         self.frm_cnt = 0
 
     def smooth_psd(self, x, previous_x, win, alpha):
@@ -41,7 +43,7 @@ class NoiseEstimationBase(object):
 
         # smoothing in frequency
         smoothed_f = convolve(x, win)
-        smoothed_f_val = smoothed_f[int((w - 1) / 2):int(-((w - 1) / 2))]
+        smoothed_f_val = smoothed_f[int((w - 1) / 2) : int(-((w - 1) / 2))]
 
         # smoothing in time
         smoothed_x = alpha * previous_x + (1 - alpha) * smoothed_f_val
