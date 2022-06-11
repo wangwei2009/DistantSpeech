@@ -72,6 +72,12 @@ def pmesh(array2D):
     plt.show()
 
 
+def pt(x):
+    plt.figure(figsize=(14, 8))
+    plt.plot(x)
+    plt.show()
+
+
 def find_files(filepath, fileType: str):
     """
     find all wav file in a directory
