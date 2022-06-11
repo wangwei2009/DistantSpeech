@@ -1,10 +1,15 @@
 """
-dual mic keyword spotting
-refer to
-    Hotword Cleaner: Dual-Microphone Adaptive Noise Cancellation With Deferred Filter Coefficients for Robust Keyword Spotting
-Author:
-    Wang Wei
+Multi-Channel Speech Presence Probability
+==============
+
+----------
+
+
+.. [1] "Hotword Cleaner: Dual-microphone Adaptive Noise Cancellation with Deferred Filter Coefficients for Robust Keyword Spotting," ICASSP 2019 - 2019 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP), 2019, pp. 6346-6350, doi: 10.1109/ICASSP.2019.8682682.
+
+
 """
+
 import argparse
 from time import time
 
