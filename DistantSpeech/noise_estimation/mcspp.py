@@ -21,7 +21,7 @@ import soundfile as sf
 
 from DistantSpeech.noise_estimation import NoiseEstimationMCRA, MCRA2, McSppBase
 from DistantSpeech.beamformer.utils import load_pcm
-from DistantSpeech.noise_estimation import McMcraComplex, McMcra
+from DistantSpeech.noise_estimation import McMcra
 from DistantSpeech.beamformer.MicArray import MicArray
 
 EPSILON = np.finfo(np.float32).eps
