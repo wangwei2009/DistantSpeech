@@ -21,8 +21,7 @@ from DistantSpeech.beamformer.MicArray import MicArray
 from DistantSpeech.beamformer.beamformer import beamformer
 from DistantSpeech.beamformer.utils import load_audio as audioread
 from DistantSpeech.beamformer.utils import save_audio as audiowrite
-from DistantSpeech.beamformer.utils import load_wav
-from DistantSpeech.beamformer.utils import visual
+from DistantSpeech.beamformer.utils import load_wav, visual, DelayBuffer
 from DistantSpeech.transform.transform import Transform
 
 
@@ -46,32 +45,6 @@ class DelayObj(object):
         self.buffer[:, -data_len:] = x
         output = self.buffer[:, :data_len].copy()
         self.buffer[:, : self.n_delay] = self.buffer[:, -self.n_delay :]
-
-        return output
-
-
-class DelayBuffer(object):
-    """delay a vector for delay frame"""
-
-    def __init__(self, data_len, delay):
-        self.data_len = data_len
-        self.n_delay = delay + 1
-
-        self.buffer = np.zeros((self.n_delay, data_len))
-
-    def delay(self, x_vec):
-        """
-        delay x for self.delay point
-        :param x: (n_samples,)
-        :return:
-        """
-        x_vec = np.squeeze(x_vec)
-
-        assert len(x_vec) == self.data_len
-
-        self.buffer[-1, :] = x_vec
-        output = self.buffer[0, :].copy()
-        self.buffer[:-1, :] = self.buffer[1:, :]
 
         return output
 
