@@ -72,9 +72,11 @@ def pmesh(array2D):
     plt.show()
 
 
-def pt(x):
+def pt(x1, x2=None):
     plt.figure(figsize=(14, 8))
-    plt.plot(x)
+    plt.plot(x1)
+    if x2 is not None:
+        plt.plot(x2)
     plt.show()
 
 
@@ -190,3 +192,29 @@ def common_path(path_os_spec, linux_prefix='/home/wangwei', windows_prefix='Z:')
         else:
             path = path_os_spec
     return path
+
+
+class DelayBuffer(object):
+    """delay a vector for delay frame"""
+
+    def __init__(self, data_len, delay):
+        self.data_len = data_len
+        self.n_delay = delay + 1
+
+        self.buffer = np.zeros((self.n_delay, data_len))
+
+    def delay(self, x_vec):
+        """
+        delay x for self.delay point
+        :param x: (n_samples,)
+        :return:
+        """
+        x_vec = np.squeeze(x_vec)
+
+        assert len(x_vec) == self.data_len
+
+        output = self.buffer[0, :].copy()
+        self.buffer[:-1, :] = self.buffer[1:, :]
+        self.buffer[-1, :] = x_vec
+
+        return output
