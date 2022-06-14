@@ -24,7 +24,7 @@ def steering(XXs):
     # get the biggest eigenvector
     vs = np.linalg.eigh(XXs)[1][:, :, -1]
 
-    # normalized by reference sensor
+    # normalize phase by reference sensor
     v0s = np.tile(np.expand_dims(vs[:, 0], axis=1), (1, nb_of_channels))
     vs /= np.exp(1j * np.angle(v0s))
 
