@@ -89,7 +89,7 @@ class MicArray(object):
             tau = self.compute_tau(incident_angle=np.array([look_direction, 0]) * np.pi / 180)
             a[:, k : k + 1] = np.exp(-1j * self.omega[k] * tau)
 
-        return a  # [M, half_bin]
+        return a.T  # [half_bin, M]
 
     def compute_tau(self, incident_angle):
         """compute delay time between mic, use (0,0,0) as reference point bu default,
