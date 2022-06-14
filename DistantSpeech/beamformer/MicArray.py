@@ -91,7 +91,7 @@ class MicArray(object):
 
         return a.T  # [half_bin, M]
 
-    def compute_tau(self, incident_angle):
+    def compute_tau(self, incident_angle, normalize=False):
         """compute delay time between mic, use (0,0,0) as reference point bu default,
         negative tau[m] indicates signal arrives at mic[m] in advance of zero point
 
@@ -101,6 +101,8 @@ class MicArray(object):
             mic array object
         incident_angle : np.array, [2] or [2,1]
             source signal imping angle, must be radius
+        normalize: bool
+            if normalize is True, normalize tau by first mic
 
         Returns
         -------
@@ -135,6 +137,9 @@ class MicArray(object):
             cos_theta = mic_loc_m @ p0 / (p0_norm * mic_m_norm + 1e-12)
             # delay between impinging signal and mic_m
             self.tau[m] = -1 * mic_m_norm * cos_theta * c_inv
+
+        if normalize:
+            self.tau = self.tau - self.tau[0, 0]
 
         return self.tau
 
@@ -186,12 +191,12 @@ if __name__ == "__main__":
     r = 0.032
     mic_array = MicArray(arrayType='circular', M=4)
     print(mic_array.mic_loc)
-    tau = compute_tau(mic_array, np.array([0, 0]) / 180 * np.pi)
+    tau = mic_array.compute_tau(np.array([0, 0]) / 180 * np.pi, normalize=True)
     print(tau * mic_array.c)
-    print((tau[-1] - tau[0]) * c)
-    print((M - 1) * r / 2)
-    print(np.abs((tau[-1] - tau[0]) * c - (M - 1) * r / 2))
-    print(np.linalg.norm(mic_array.mic_loc[0] - mic_array.mic_loc[1]))
-    print((tau[0] - tau[1]) * c + r)
-    print((tau[0] * c))
-    print(tau[1])
+    # print((tau[-1] - tau[0]) * c)
+    # print((M - 1) * r / 2)
+    # print(np.abs((tau[-1] - tau[0]) * c - (M - 1) * r / 2))
+    # print(np.linalg.norm(mic_array.mic_loc[0] - mic_array.mic_loc[1]))
+    # print((tau[0] - tau[1]) * c + r)
+    # print((tau[0] * c))
+    # print(tau[1])
