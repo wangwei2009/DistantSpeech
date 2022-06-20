@@ -218,3 +218,27 @@ class DelayBuffer(object):
         self.buffer[-1, :] = x_vec
 
         return output
+
+
+class DelaySamples(object):
+    def __init__(self, data_len, delay, channel=1):
+        self.data_len = data_len
+        self.n_delay = delay
+
+        self.buffer = np.zeros(((data_len + delay), channel))
+
+    def delay(self, x):
+        """
+        delay x for self.delay point
+        :param x: (n_samples,) or (n_samples, n_chs)
+        :return:
+        """
+        if len(x.shape) == 1:
+            x = x[:, np.newaxis]
+        data_len = x.shape[0]
+
+        self.buffer[-data_len:, :] = x
+        output = self.buffer[:data_len, :].copy()
+        self.buffer[: self.n_delay, :] = self.buffer[-self.n_delay :, :]
+
+        return output
