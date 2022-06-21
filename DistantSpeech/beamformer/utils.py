@@ -194,7 +194,7 @@ def common_path(path_os_spec, linux_prefix='/home/wangwei', windows_prefix='Z:')
     return path
 
 
-class DelayBuffer(object):
+class DelayFrames(object):
     """delay a vector for delay frame"""
 
     def __init__(self, data_len, delay):
@@ -205,7 +205,7 @@ class DelayBuffer(object):
 
     def delay(self, x_vec):
         """
-        delay x for self.delay point
+        delay x for delay frames
         :param x: (n_samples,)
         :return:
         """
