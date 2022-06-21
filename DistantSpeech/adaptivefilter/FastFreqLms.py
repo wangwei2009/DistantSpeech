@@ -87,18 +87,36 @@ class FastFreqLms(BaseFilter):
         return self.input_buffer
 
     def update(self, x_n_vec, d_n_vec, update=True, p=1.0, fir_truncate=None):
-        """
-        fast frequency lms update function
-        :param x_n_vec: the signal need to be filtered, (n_samples,) or (n_samples, n_chs)
-        :param d_n_vec: expected signal, (n_samples,) or (n_samples, 1)
-        :return: error , filter weights
+        """fast frequency lms update function
+
+        Parameters
+        ----------
+        x_n_vec : np.array, (n_samples,) or (n_samples, n_chs)
+            input signal
+        d_n_vec : np.array,  (n_samples,) or (n_samples, 1)
+            expected signal
+        update : bool, optional
+            control whether update filter coeffs, by default True
+        p : float, optional
+            speech present prob, by default 1.0
+        fir_truncate : np.array, optional
+            fir truncate length, by default None
+
+        Returns
+        -------
+        e : np.array, (n_samples, 1)
+            error output signal
+        w : np.array,  (filter_len, 1)
+            estimated filter coeffs
         """
         self.update_input(x_n_vec)
         X = np.fft.rfft(self.input_buffer, n=self.n_fft, axis=0)
         self.P = self.alpha * self.P + (1 - self.alpha) * np.sum(np.real((X.conj() * X)), axis=1, keepdims=True)
 
+        # save only the last half frame to avoid circular convolution effects
         y = np.fft.irfft(X * self.W, axis=0)[-self.filter_len :, :]
 
+        # summation of multichannel signal
         y = np.sum(y, axis=1, keepdims=True)
 
         # use causal filter to estimate non-causal system will introduce a delay(filter_len/2) compare to expected signal
