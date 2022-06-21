@@ -148,7 +148,6 @@ class FDGSC(beamformer):
             # fix delay
             fixed_output = self.delay_fbf.delay(fixed_output.T)
 
-            print('fixed_output:{}'.format(fixed_output.shape))
             # AIC block
             output_n, _ = self.aic_filter.update(
                 bm_output[n * self.frameLen : (n + 1) * self.frameLen, :],
