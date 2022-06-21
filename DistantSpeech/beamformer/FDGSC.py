@@ -16,7 +16,7 @@ from DistantSpeech.beamformer.MicArray import MicArray
 from DistantSpeech.beamformer.beamformer import beamformer
 from DistantSpeech.beamformer.utils import load_audio as audioread
 from DistantSpeech.beamformer.utils import save_audio as audiowrite
-from DistantSpeech.beamformer.utils import visual
+from DistantSpeech.beamformer.utils import visual, DelaySamples
 from DistantSpeech.noise_estimation.mcspp_base import McSppBase
 from DistantSpeech.transform.transform import Transform
 from DistantSpeech.noise_estimation import McSpp
@@ -68,17 +68,17 @@ class FDGSC(beamformer):
 
         self.bm = []
         for m in range(self.M):
-            self.bm.append(FastFreqLms(filter_len=frameLen, mu=0.01, alpha=0.8))
+            self.bm.append(FastFreqLms(filter_len=frameLen, mu=0.1, alpha=0.9, non_causal=True))
 
-        self.aic_filter = FastFreqLms(filter_len=frameLen, n_channels=self.M, mu=0.1, alpha=0.8)
+        self.aic_filter = FastFreqLms(filter_len=frameLen, n_channels=self.M, mu=0.1, alpha=0.9, non_causal=True)
 
-        self.delay_obj = DelayObj(self.frameLen, 16)
+        self.delay_fbf = DelaySamples(self.frameLen, int(frameLen / 2))
 
         self.delay_obj_bm = DelayObj(self.frameLen, 8, channel=self.M)
 
-        # self.spp = McSpp(nfft=nfft, channels=self.M)
-        self.spp = McSppBase(nfft=nfft, channels=self.M)
-        self.transform = Transform(n_fft=512, hop_length=256, channel=self.M)
+        self.spp = McSpp(nfft=frameLen * 2, channels=2)
+        # self.spp = McSppBase(nfft=frameLen * 2, channels=self.M)
+        self.transform = Transform(n_fft=frameLen * 2, hop_length=frameLen, channel=2)
         self.spp.mcra.L = 10
 
     def fixed_delay(self):
@@ -127,40 +127,40 @@ class FDGSC(beamformer):
         # overlaps-save approach, no need to use hop_size
         frameNum = int((x.shape[1]) / self.frameLen)
 
-        p = np.zeros((self.half_bin, frameNum))
+        p = np.zeros((self.spp.half_bin, frameNum))
 
-        D = self.transform.stft(np.transpose(x))
+        D = self.transform.stft(np.transpose(x[[0, -1], :]))
 
         for n in range(frameNum):
             x_n = x[:, n * self.frameLen : (n + 1) * self.frameLen]
 
             p[:, n] = self.spp.estimation(D[:, n, :])
-
-            # bm_update = True if n < int(550000 / self.frameLen) else False
-            # aic_update = True if n > int(550000 / self.frameLen) else False
+            p[:, n] = np.sqrt(p[:, n])
 
             # fixed beamformer path
             fixed_output = self.fixed_beamformer(x_n)
 
-            lower_path_delayed = self.delay_obj_bm.delay(x_n)
-
             # adaptive block matrix
             for m in range(self.M):
-                bm_output_n, _ = self.bm[m].update(fixed_output.T, lower_path_delayed[m, :], update=False, p=p[:, n])
+                bm_output_n, _ = self.bm[m].update(fixed_output.T, x_n[m, :], p=p[:, n : n + 1], fir_truncate=30)
                 bm_output[n * self.frameLen : (n + 1) * self.frameLen, m] = np.squeeze(bm_output_n)
 
             # fix delay
-            fixed_output = self.delay_obj.delay(fixed_output)
+            fixed_output = self.delay_fbf.delay(fixed_output.T)
 
+            print('fixed_output:{}'.format(fixed_output.shape))
             # AIC block
             output_n, _ = self.aic_filter.update(
                 bm_output[n * self.frameLen : (n + 1) * self.frameLen, :],
-                fixed_output.T,
-                update=True,
-                p=1,
+                fixed_output,
+                p=1 - p[:, n : n + 1],
+                fir_truncate=30,
             )
 
             output[n * self.frameLen : (n + 1) * self.frameLen] = np.squeeze(output_n)
+            # output[n * self.frameLen : (n + 1) * self.frameLen] = np.squeeze(
+            #     bm_output[n * self.frameLen : (n + 1) * self.frameLen, 0]
+            # )
 
         return output, p
 
@@ -214,14 +214,14 @@ def test_delay():
 
     delay = 128
     buffer_len = 512
-    delay_obj = DelayObj(buffer_len, delay)
+    delay_fbf = DelayObj(buffer_len, delay)
 
     n_frame = int(len(x) / buffer_len)
 
     output = np.zeros(len(x))
 
     for n in range(n_frame):
-        output[n * buffer_len : (n + 1) * buffer_len] = delay_obj.delay(x[n * buffer_len : (n + 1) * buffer_len])
+        output[n * buffer_len : (n + 1) * buffer_len] = delay_fbf.delay(x[n * buffer_len : (n + 1) * buffer_len])
 
     plt.figure()
     plt.plot(x)
