@@ -86,7 +86,7 @@ class FastFreqLms(BaseFilter):
 
         return self.input_buffer
 
-    def update(self, x_n_vec, d_n_vec, update=True, p=None, fir_constraint=False, fir_truncate=5):
+    def update(self, x_n_vec, d_n_vec, update=True, p=1.0, fir_truncate=None):
         """
         fast frequency lms update function
         :param x_n_vec: the signal need to be filtered, (n_samples,) or (n_samples, n_chs)
@@ -122,12 +122,12 @@ class FastFreqLms(BaseFilter):
             grad = fft(grad_1, n=self.n_fft, axis=0)
 
         if update:
-            self.W = self.W + 2 * self.mu * grad  # update filter weights
+            self.W = self.W + p * 2 * self.mu * grad  # update filter weights
 
         w_est = ifft(self.W, n=self.n_fft, axis=0)
         self.w = w_est[: self.filter_len, :]
 
-        if fir_constraint:
+        if fir_truncate is not None:
             w_shift = self.w.copy()
             w_shift[:fir_truncate] = 0.0
             w_shift[-fir_truncate:] = 0.0
