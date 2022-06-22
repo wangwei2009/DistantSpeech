@@ -7,50 +7,42 @@ import numpy as np
 
 import time
 
-from beamformer.MicArray import MicArray
-from beamformer.adaptivebeamformer import adaptivebeamfomer
-from beamformer.utils import mesh,pmesh,load_wav,load_pcm
+from DistantSpeech.beamformer.MicArray import MicArray
+from DistantSpeech.beamformer.adaptivebeamformer import adaptivebeamfomer
+from DistantSpeech.beamformer.utils import mesh, pmesh, load_wav, load_pcm
 
 import matplotlib.pyplot as plt
-import sounddevice as sd
+
+# import sounddevice as sd
 import soundfile as sf
 from scipy.io import wavfile
 
-filepath = "test_audio/rec1/"
-x,sr = load_wav(filepath)
+# filepath = "test_audio/rec1/"
+# x, sr = load_wav(filepath)
+
+filepath = "/home/wangwei/work/speechenhancement/audio_data/3m"
+x = load_pcm(filepath)  # [N, samples]
+print(x.shape)
+
 sr = 16000
 r = 0.032
 c = 343
+M = 2
 
 frameLen = 256
-hop = frameLen/2
+hop = frameLen / 2
 overlap = frameLen - hop
 nfft = 256
 c = 340
 r = 0.032
 fs = sr
 
-start = time.clock()
 
-MicArray = MicArray(arrayType='circular', r=0.032, M=4)
-angle = np.array([197, 0]) / 180 * np.pi
+MicArray = MicArray(arrayType='linear', r=0.04, M=M)
+angle = np.array([0, 0]) / 180 * np.pi
 
-adaptivebeamfomer = adaptivebeamfomer(MicArray,frameLen,hop,nfft,c,r,fs)
-yout = adaptivebeamfomer.process(x,angle,method=3,retH=True,retWNG=True,retDI=True)
-
-end = time.clock()
-print(end-start)
-
-# listen processed result
-sd.default.channels = 1
-sd.play(yout['data'],fs)
-sd.wait()
-
-# view beampattern
-mesh(yout['beampattern'])
-# pmesh(yout['beampattern'])
+adaptivebeamfomer_obj = adaptivebeamfomer(MicArray, frameLen, hop, nfft, c, r, fs)
+yout = adaptivebeamfomer_obj.process(x, angle, method=3)
 
 # save audio
-# wavfile.write('output/output_fixedbeamformer.wav',16000,yout['data'])
-
-
+wavfile.write('output_3m.wav', 16000, yout['data'])

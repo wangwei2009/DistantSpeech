@@ -5,12 +5,12 @@ from DistantSpeech.noise_estimation.mcra import NoiseEstimationMCRA
 from DistantSpeech.noise_estimation.mcspp_base import McSppBase
 from DistantSpeech.noise_estimation.omlsa_multi import NsOmlsaMulti
 from DistantSpeech.noise_estimation.mc_mcra import McMcra
+from DistantSpeech.noise_estimation.mcspp import McSpp
 from DistantSpeech.transform.transform import Transform
 from .beamformer import beamformer
 
 
 class GSC(beamformer):
-
     def __init__(self, MicArray, frameLen=256, hop=None, nfft=None, channels=4, c=343, r=0.032, fs=16000):
 
         beamformer.__init__(self, MicArray)
@@ -177,15 +177,18 @@ class GSC(beamformer):
                     # use speech presence probability to control AIC update
                     self.Pest[k] = 1  # rho * self.Pest[k] + (1 - rho) * np.sum(np.power(np.abs(Z[:,k]),2))
                     # update MNC weights
-                    self.G[:, k] = self.G[:, k] + mu * (1 - self.spp.p[k]) * self.U[:, k] * Y[k, t].conj() / self.Pest[k]
+                    self.G[:, k] = (
+                        self.G[:, k] + mu * (1 - self.spp.p[k]) * self.U[:, k] * Y[k, t].conj() / self.Pest[k]
+                    )
 
                     if retWNG:
                         WNG[k] = self.calcWNG(a, self.H[:, k, np.newaxis])
                     if retDI:
                         DI[k] = self.calcDI(a, self.H[:, k, np.newaxis], self.Fvv[k, :, :])
 
-                self.omlsa_multi.estimation(np.real(Y[:, t]*np.conj(Y[:, t])),
-                                            np.real(self.U*np.conj(self.U)).transpose())
+                self.omlsa_multi.estimation(
+                    np.real(Y[:, t] * np.conj(Y[:, t])), np.real(self.U * np.conj(self.U)).transpose()
+                )
 
                 # post-filter
                 Y[:, t] = Y[:, t] * self.spp.G
@@ -196,8 +199,4 @@ class GSC(beamformer):
         if retH:
             beampattern = self.beampattern(self.omega, self.H)
 
-        return {'data': yout,
-                'WNG': WNG,
-                'DI': DI,
-                'beampattern': beampattern
-                }
+        return {'data': yout, 'WNG': WNG, 'DI': DI, 'beampattern': beampattern}

@@ -3,18 +3,17 @@ import wave
 
 import pyaudio
 import numpy as np
-from DistantSpeech.beamformer.fixedbeamformer import fixedbeamformer
 import threading
 import wave
 
 import numpy as np
 import pyaudio
 
-from DistantSpeech.beamformer.fixedbeamformer import fixedbeamformer
+from DistantSpeech.beamformer.fixedbeamformer import FixedBeamformer
 
 
 class realtime_processing(object):
-    def __init__(self, EnhancementMehtod=fixedbeamformer, angle=0,chunk=1024, channels=6, rate=16000,Recording=False):
+    def __init__(self, EnhancementMehtod=FixedBeamformer, angle=0, chunk=1024, channels=6, rate=16000, Recording=False):
         self.CHUNK = chunk
         self.FORMAT = pyaudio.paInt16
         self.CHANNELS = channels
@@ -39,22 +38,26 @@ class realtime_processing(object):
         self._running = True
         self._frames = []
         p = pyaudio.PyAudio()
-        streamOut = p.open(format=self.FORMAT,
-                        channels=1,
-                        rate=self.RATE,
-                        input=False,
-                        output=True,
-                        # output_device_index=4,
-                        frames_per_buffer=self.CHUNK)
+        streamOut = p.open(
+            format=self.FORMAT,
+            channels=1,
+            rate=self.RATE,
+            input=False,
+            output=True,
+            # output_device_index=4,
+            frames_per_buffer=self.CHUNK,
+        )
 
-        stream = p.open(format=self.FORMAT,
-                        channels=self.CHANNELS,
-                        rate=self.RATE,
-                        input=True,
-                        output=False,
-                        # output_device_index=4,
-                        frames_per_buffer=self.CHUNK)
-        while (self._running):
+        stream = p.open(
+            format=self.FORMAT,
+            channels=self.CHANNELS,
+            rate=self.RATE,
+            input=True,
+            output=False,
+            # output_device_index=4,
+            frames_per_buffer=self.CHUNK,
+        )
+        while self._running:
             data = stream.read(self.CHUNK)
             MultiChannelData = np.zeros((self.CHUNK, 6), dtype=float)
             if self.CHANNELS == 6:
@@ -63,9 +66,9 @@ class realtime_processing(object):
                 # start = time.clock()
                 MultiChannelData = np.reshape(samps, (self.CHUNK, 6))
 
-                yout = self.EnhancementMethod.process(MultiChannelData[:, 1:5].T, self.angle,self.method)
-                MultiChannelData[:,5] = yout['data']
-                data = (MultiChannelData[:,5] * 32768).astype('<i2').tostring()
+                yout = self.EnhancementMethod.process(MultiChannelData[:, 1:5].T, self.angle, self.method)
+                MultiChannelData[:, 5] = yout['data']
+                data = (MultiChannelData[:, 5] * 32768).astype('<i2').tostring()
                 # end = time.clock()
                 # print(end - start, '\n')
                 if self.isRecording:
@@ -80,7 +83,8 @@ class realtime_processing(object):
 
     def stop(self):
         self._running = False
-    def changeAlgorithm(self,index):
+
+    def changeAlgorithm(self, index):
         self.method = index
 
     def save(self, filename):
@@ -95,4 +99,3 @@ class realtime_processing(object):
         wf.writeframes(b''.join(self._frames))
         wf.close()
         print("Saved")
-

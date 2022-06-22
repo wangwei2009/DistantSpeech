@@ -7,7 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.6", "3.7"]
+        python-version: ["3.8"]
     steps:
     - uses: actions/checkout@v2
     - name: Set up Python ${{ matrix.python-version }}
@@ -19,7 +19,20 @@ jobs:
         python -m pip install --upgrade pip
         pip install numpy wheel
         sudo apt install portaudio19-dev
+        sudo apt-get install libsndfile1
         pip install -r requirements.txt
+        pip install -e .
+        pip install pylint
+        pip install Sphinx
+        pip install sphinx_rtd_theme
     - name: Analysing the code with pylint
       run: |
-        pylint $(git ls-files '*.py') --max-line-length=200 --variable-rgxs=^[_a-z][_a-z0-9]?$
+        pylint DistantSpeech --disable=all --disable=unused-import
+    - name: Unittests with pytest
+      run: |
+          pytest tests/unittests
+    - name: Generate docs
+      run: |
+          cd docs
+          sphinx-apidoc -o ./source ../DistantSpeech -f -e
+          make html

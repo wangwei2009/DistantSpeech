@@ -22,7 +22,7 @@ def visual(x, y=None, sr=16000):
         S_db1 = spec(x)
         S_db2 = spec(y)
 
-        plt.figure()
+        plt.figure(figsize=(14, 8))
         plt.subplot(2, 1, 1)
         librosa.display.specshow(S_db1, y_axis='linear', x_axis='time', sr=sr)
         plt.colorbar()
@@ -34,7 +34,7 @@ def visual(x, y=None, sr=16000):
         plt.show()
     else:
         S_db = spec(x)
-        plt.figure()
+        plt.figure(figsize=(14, 8))
         librosa.display.specshow(S_db, y_axis='linear', x_axis='time', sr=sr)
         plt.colorbar()
         plt.show()
@@ -49,7 +49,7 @@ def mesh(array2D):
     Y = np.arange(0, size[0], 1)
     X = np.arange(0, size[1], 1)
     X, Y = np.meshgrid(X, Y)
-    fig1 = plt.figure()
+    fig1 = plt.figure(figsize=(14, 8))
     ax = Axes3D(fig1)
     surf = ax.plot_surface(X, Y, array2D, cmap=cm.coolwarm, linewidth=0, antialiased=False)
     fig1.colorbar(surf, shrink=0.5, aspect=5)
@@ -61,6 +61,7 @@ def pmesh(array2D):
     plot color 2D array
 
     """
+    plt.figure(figsize=(14, 8))
     size = array2D.shape
     Y = np.arange(0, size[0], 1)
     X = np.arange(0, size[1], 1)
@@ -71,12 +72,21 @@ def pmesh(array2D):
     plt.show()
 
 
+def pt(x1, x2=None):
+    plt.figure(figsize=(14, 8))
+    plt.plot(x1)
+    if x2 is not None:
+        plt.plot(x2)
+    plt.show()
+
+
 def find_files(filepath, fileType: str):
     """
     find all wav file in a directory
 
     """
     import os
+
     filename = os.listdir(filepath)
     wavlist = []
     for names in filename:
@@ -92,6 +102,7 @@ def load_wav(filepath):
 
     """
     import librosa
+
     filename = find_files(filepath, ".wav")
     wavdata_list = []
     is_channel_1 = 1
@@ -120,6 +131,7 @@ def load_pcm(filepath):
 
     """
     import numpy as np
+
     filename = find_files(filepath, ".pcm")
     wavdata_list = []
     for names in filename:
@@ -139,6 +151,7 @@ def filter(x):
 
     """
     from scipy import signal
+
     h = signal.firwin(513, 0.01, pass_zero=False)
     size = x.shape
     M = size[0]
@@ -169,13 +182,63 @@ def common_path(path_os_spec, linux_prefix='/home/wangwei', windows_prefix='Z:')
     if platform.system() == 'Windows':
         index = path_os_spec.find(linux_prefix)
         if index != -1:
-            path = windows_prefix + path_os_spec[len(linux_prefix):]
+            path = windows_prefix + path_os_spec[len(linux_prefix) :]
         else:
             path = path_os_spec
     elif platform.system() == 'Linux':
         index = path_os_spec.find(windows_prefix)
         if index != -1:
-            path = linux_prefix + path_os_spec[len(windows_prefix):]
+            path = linux_prefix + path_os_spec[len(windows_prefix) :]
         else:
             path = path_os_spec
     return path
+
+
+class DelayFrames(object):
+    """delay a vector for delay frame"""
+
+    def __init__(self, data_len, delay):
+        self.data_len = data_len
+        self.n_delay = delay + 1
+
+        self.buffer = np.zeros((self.n_delay, data_len))
+
+    def delay(self, x_vec):
+        """
+        delay x for delay frames
+        :param x: (n_samples,)
+        :return:
+        """
+        x_vec = np.squeeze(x_vec)
+
+        assert len(x_vec) == self.data_len
+
+        output = self.buffer[0, :].copy()
+        self.buffer[:-1, :] = self.buffer[1:, :]
+        self.buffer[-1, :] = x_vec
+
+        return output
+
+
+class DelaySamples(object):
+    def __init__(self, data_len, delay, channel=1):
+        self.data_len = data_len
+        self.n_delay = delay
+
+        self.buffer = np.zeros(((data_len + delay), channel))
+
+    def delay(self, x):
+        """
+        delay x for self.delay point
+        :param x: (n_samples,) or (n_samples, n_chs)
+        :return:
+        """
+        if len(x.shape) == 1:
+            x = x[:, np.newaxis]
+        data_len = x.shape[0]
+
+        self.buffer[-data_len:, :] = x
+        output = self.buffer[:data_len, :].copy()
+        self.buffer[: self.n_delay, :] = self.buffer[-self.n_delay :, :]
+
+        return output
