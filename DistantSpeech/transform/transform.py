@@ -410,8 +410,7 @@ class Transform(object):
         self.n_fft = n_fft
         self.frame_length = self.n_fft
         self.hop_length = hop_length
-        self.previous_input = np.zeros((self.hop_length, self.channel))
-        self.previous_output = np.zeros((self.hop_length, self.channel))
+
         self.first_frame = 1
         if window is not None:
             self.window = window
@@ -419,6 +418,14 @@ class Transform(object):
             self.window = get_window("hann", n_fft, fftbins=True)
             self.window = np.sqrt(self.window)
         self.half_bin = int(self.n_fft / 2 + 1)
+
+        self.win_len = self.window.shape[0]
+
+        self.overlap = self.win_len - self.hop_length
+        self.previous_input = np.zeros((self.overlap, self.channel))
+        self.previous_output = np.zeros((self.overlap, self.channel))
+
+        self.W0 = np.sum(self.window**2)  # find W0
 
     def stft(self, x):
         """
@@ -441,7 +448,7 @@ class Transform(object):
                 center=False,
                 window=self.window,
             )  # [1 + n_fft/2, n_frames]
-            self.previous_input[:, ch] = x[-self.hop_length :, ch]
+            self.previous_input[:, ch] = x[-self.overlap :, ch]
 
         return np.squeeze(Y)
 
@@ -460,9 +467,12 @@ class Transform(object):
             center=False,
             window=self.window,
         )
-        x[: self.hop_length] += self.previous_output[:, 0]
-        self.previous_output[:, 0] = x[-self.hop_length :]
-        return x[: -self.hop_length]
+        x[: self.overlap] += self.previous_output[:, 0]
+        self.previous_output[:, 0] = x[-self.overlap :]
+
+        output = x[: -self.overlap] * self.hop_length / self.W0
+
+        return output
 
     def magphase(self, D, power=1):
         mag = np.abs(D)
