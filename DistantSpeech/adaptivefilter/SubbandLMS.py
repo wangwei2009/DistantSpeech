@@ -9,7 +9,9 @@ from DistantSpeech.transform.subband import Subband
 
 
 class SubbandLMS(BaseFilter):
-    def __init__(self, filter_len=2, num_bands=512, mu=0.1, normalization=True, alpha=0.9, m=2, hop_length=None):
+    def __init__(
+        self, filter_len=2, num_bands=512, mu=0.1, normalization=True, alpha=0.9, m=2, hop_length=None, input_td=False
+    ):
         self.filter_len = filter_len
         half_band = int(num_bands / 2) + 1
 
@@ -40,7 +42,7 @@ class SubbandLMS(BaseFilter):
     def update(self, x_n, d_n, alpha=1e-4):
         return_td = False
         # if input float data(fullband signal),
-        if x_n.dtype == float and d_n.dtype == float:
+        if 'float' in str(x_n.dtype) and 'float' in str(d_n.dtype):
             x_n = self.transform_x.analysis(x_n)
             d_n = self.transform_d.analysis(d_n)
             return_td = True
