@@ -1,3 +1,5 @@
+import os
+import pickle
 import librosa
 import matplotlib.pyplot as plt
 import numpy as np
@@ -7,14 +9,25 @@ from librosa import util
 from librosa.filters import get_window
 from numba import jit
 from DistantSpeech.transform.prototype_filter import PrototypeFilter
+from DistantSpeech.transform.design_nyquist_filter import (
+    design_Nyquist_analyasis_filter_prototype,
+    design_Nyquist_synthesis_filter_prototype,
+)
 
 
 class Subband(object):
-    def __init__(self, channel=1, n_fft=256, hop_length=128, window=None):
+    def __init__(self, channel=1, n_fft=256, hop_length=128, window=None, m=2):
         self.channel = channel
         self.n_fft = n_fft
         self.frame_length = self.n_fft
         self.hop_length = hop_length
+
+        r = int(n_fft / hop_length / 2)  # Decimation factor
+        M = n_fft
+        # m = 2  # Prototype filter length factor
+        self.h, self.g = self.design_prototype_filter(n_fft, m, r=r)
+        print('self.h:{}'.format(self.h.shape))
+        print('self.g:{}'.format(self.g.shape))
 
         self.first_frame = 1
         if window is not None:
@@ -30,6 +43,61 @@ class Subband(object):
         self.overlap = self.win_len - self.hop_length
         self.previous_input = np.zeros((self.overlap, self.channel))
         self.previous_output = np.zeros((self.win_len, self.channel))
+
+        self.W0 = np.sum(self.g**2)  # find W0
+
+    def design_prototype_filter(
+        self, num_bands, m, r=1, outputdir='/home/wangwei/work/DistantSpeech/DistantSpeech/transform/prototype.ny'
+    ):
+        M = num_bands
+        D = M // (2**r)  # window shift
+        if D == 0:
+            D = 1
+
+        if not os.path.exists(outputdir):
+            os.makedirs(outputdir)
+
+        analysis_filename = os.path.join(outputdir, 'h-M%d-m%d-r%d.pickle' % (M, m, r))
+        synthesis_filename = os.path.join(outputdir, 'g-M%d-m%d-r%d.pickle' % (M, m, r))
+        if os.path.exists(analysis_filename) and os.path.exists(synthesis_filename):
+            with open(analysis_filename, 'rb') as fp:
+                print('Loading analysis prototype from \'%s\'' % analysis_filename)
+                h = pickle.load(fp)
+            # Read synthesis prototype 'g'
+            with open(synthesis_filename, 'rb') as fp:
+                print('Loading synthesis prototype from \'%s\'' % synthesis_filename)
+                g = pickle.load(fp)
+        else:
+            (h, beta) = design_Nyquist_analyasis_filter_prototype(M, m, D)
+            print('Inband aliasing error: %f dB' % (10 * np.log(beta)))
+
+            (g, epsir) = design_Nyquist_synthesis_filter_prototype(h, M, m, D)
+            print('Residual aliasing distortion: %f dB' % (10 * np.log(epsir)))
+
+            (h, beta) = design_Nyquist_analyasis_filter_prototype(M, m, D)
+            print('Inband aliasing error: %f dB' % (10 * np.log(beta)))
+            analysis_filename = os.path.join(outputdir, 'h-M%d-m%d-r%d.pickle' % (M, m, r))
+            with open(analysis_filename, 'wb') as hfp:
+                pickle.dump(h.flatten(), hfp, True)
+
+            (g, epsir) = design_Nyquist_synthesis_filter_prototype(h, M, m, D)
+            print('Residual aliasing distortion: %f dB' % (10 * np.log(epsir)))
+            synthesis_filename = os.path.join(outputdir, 'g-M%d-m%d-r%d.pickle' % (M, m, r))
+            with open(synthesis_filename, 'wb') as gfp:
+                pickle.dump(g.flatten(), gfp, True)
+
+            coeff_filename = os.path.join(outputdir, 'M=%d-m=%d-r=%d.m' % (M, m, r))
+            with open(coeff_filename, 'w') as cfp:
+                for coeff in h:
+                    cfp.write('%e ' % (coeff))
+                cfp.write('\n')
+                for coeff in g:
+                    cfp.write('%e ' % (coeff))
+
+        self.h = h.squeeze()
+        self.g = g.squeeze()
+
+        return self.h, self.g
 
     def analysis(self, x):
         """
@@ -48,7 +116,7 @@ class Subband(object):
             x_ch = x[:, ch]
             for n in range(n_frames):
                 x_ch_n = x_ch[self.hop_length * n : self.hop_length * n + self.win_len]
-                windowed = np.flip(x_ch_n) * self.window
+                windowed = np.flip(x_ch_n) * self.h
                 x_sumed = np.sum(np.reshape(windowed, (self.D, -1)), axis=0)
                 Y[:, n, ch] = np.fft.rfft(x_sumed)
 
@@ -72,7 +140,7 @@ class Subband(object):
             y = np.fft.irfft(Y[:, n : n + 1], axis=0)
             # print(y)
             y_repmat = np.tile(y, (self.D, 1))
-            y_windowed = y_repmat[:, 0] * self.window
+            y_windowed = y_repmat[:, 0] * self.g
 
             tdl[self.hop_length :] = tdl[: -self.hop_length]
             tdl[: self.hop_length] = 0.0
@@ -83,7 +151,15 @@ class Subband(object):
 
         self.previous_output[:, 0] = tdl.copy()
 
-        return output[: self.hop_length * n_frames]
+        return output[: self.hop_length * n_frames] / self.hop_length
+
+    def stft(self, x):
+
+        return self.analysis(x)
+
+    def istft(self, Y):
+
+        return self.synthesis(Y)
 
     def magphase(self, D, power=1):
         mag = np.abs(D)
