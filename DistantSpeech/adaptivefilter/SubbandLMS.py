@@ -14,6 +14,7 @@ class SubbandLMS(BaseFilter):
     ):
         self.filter_len = filter_len
         half_band = int(num_bands / 2) + 1
+        self.half_band = half_band
 
         self.W = np.zeros((filter_len, half_band), dtype=complex)
         self.mu = np.ones((half_band,)) * mu
@@ -39,7 +40,7 @@ class SubbandLMS(BaseFilter):
         self.input_buffer[1:, :] = self.input_buffer[:-1, :]
         self.input_buffer[0, :] = xt
 
-    def update(self, x_n, d_n, alpha=1e-4):
+    def update(self, x_n, d_n, alpha=1e-4, p=None):
         return_td = False
         # if input float data(fullband signal),
         if 'float' in str(x_n.dtype) and 'float' in str(d_n.dtype):
@@ -50,7 +51,11 @@ class SubbandLMS(BaseFilter):
 
         # error signal
         filter_output = np.einsum('ij,ij->j', self.W.conj(), self.input_buffer)
-        err = d_n - filter_output
+        if p is not None:
+            assert p.shape[0] == self.half_band
+            err = d_n - filter_output * p
+        else:
+            err = d_n - filter_output
 
         if self.norm:
             self.P = (
@@ -61,18 +66,21 @@ class SubbandLMS(BaseFilter):
         else:
             grad = self.input_buffer * err.conj()  # LMS
 
-        self.update_coef(grad)
+        self.update_coef(grad, p=p)
 
         if return_td:
             err = self.transform_d.synthesis(err)
 
         return err, self.W
 
-    def update_coef(self, grad):
+    def update_coef(self, grad, p=None):
 
         if grad.ndim == 1:
             grad = grad[:, np.newaxis]
-        self.W = self.W + 2 * self.mu * grad
+        if p is not None:
+            self.W = self.W + 2 * self.mu * grad * p
+        else:
+            self.W = self.W + 2 * self.mu * grad
 
         return self.W
 
