@@ -481,6 +481,14 @@ class Transform(object):
 
         return mag, phase
 
+    def analysis(self, x):
+
+        return self.stft(x)
+
+    def synthesis(self, Y):
+
+        return self.istft(Y)
+
 
 if __name__ == "__main__":
     filename = "DistantSpeech/transform/speech1.wav"
