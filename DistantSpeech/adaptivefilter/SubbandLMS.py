@@ -5,20 +5,27 @@ from matplotlib import pyplot as plt
 from tqdm import tqdm
 from DistantSpeech.beamformer.utils import load_audio
 from DistantSpeech.adaptivefilter import BaseFilter
+from DistantSpeech.transform.subband import Subband
 
 
 class SubbandLMS(BaseFilter):
-    def __init__(self, filter_len=2, num_bands=257, mu=0.1, normalization=True, alpha=0.9):
+    def __init__(self, filter_len=2, num_bands=512, mu=0.1, normalization=True, alpha=0.9, m=2, hop_length=None):
         self.filter_len = filter_len
-        self.num_bands = num_bands
+        half_band = int(num_bands / 2) + 1
 
-        self.W = np.zeros((filter_len, num_bands), dtype=complex)
-        self.mu = mu
+        self.W = np.zeros((filter_len, half_band), dtype=complex)
+        self.mu = np.ones((half_band,)) * mu
         self.norm = normalization
         self.alpha = alpha
 
-        self.input_buffer = np.zeros((filter_len, num_bands), dtype=complex)
-        self.P = np.zeros((num_bands,))
+        self.input_buffer = np.zeros((filter_len, half_band), dtype=complex)
+        self.P = np.zeros((half_band,))
+
+        # r = int(n_fft / hop_length / 2)  # Decimation factor
+        if hop_length is None:
+            hop_length = int(num_bands / 2)
+        self.transform_x = Subband(n_fft=num_bands, hop_length=hop_length, m=m)
+        self.transform_d = Subband(n_fft=num_bands, hop_length=hop_length, m=m)
 
     def update_input(self, xt):
         """
@@ -31,6 +38,12 @@ class SubbandLMS(BaseFilter):
         self.input_buffer[0, :] = xt
 
     def update(self, x_n, d_n, alpha=1e-4):
+        return_td = False
+        # if input float data(fullband signal),
+        if x_n.dtype == float and d_n.dtype == float:
+            x_n = self.transform_x.analysis(x_n)
+            d_n = self.transform_d.analysis(d_n)
+            return_td = True
         self.update_input(x_n)
 
         # error signal
@@ -47,6 +60,9 @@ class SubbandLMS(BaseFilter):
             grad = self.input_buffer * err.conj()  # LMS
 
         self.update_coef(grad)
+
+        if return_td:
+            err = self.transform_d.synthesis(err)
 
         return err, self.W
 
