@@ -116,14 +116,14 @@ class Mdf(BaseFilter):
         """
         self.update_input(x_n_vec)
 
-        Xm = fft(self.input_buffer, n=self.n_fft, axis=0)
+        Xm = fft(self.input_buffer, n=self.n_fft, axis=0)  # eq.1
 
-        self.X = update_matrix(self.X, Xm)
+        self.X = update_matrix(self.X, Xm)  # eq.2
 
-        Pm = np.sum(np.real((Xm.conj() * Xm)), axis=1, keepdims=True)
-        self.Pm = update_matrix(self.Pm, Pm)
+        Pm = np.sum(np.real((Xm.conj() * Xm)), axis=1, keepdims=True)  # eq.12
+        self.Pm = update_matrix(self.Pm, Pm)  # eq.13
 
-        self.P = self.alpha * self.P + (1 - self.alpha) * np.sum(self.Pm, axis=1, keepdims=True)
+        self.P = self.alpha * self.P + (1 - self.alpha) * np.sum(self.Pm, axis=1, keepdims=True)  # eq.11
 
         # save only the last half frame to avoid circular convolution effects
         y = ifft(np.sum(self.X * self.W, axis=1, keepdims=True), axis=0)[-self.block_len :, :]
