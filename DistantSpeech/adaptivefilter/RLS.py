@@ -14,13 +14,14 @@ from DistantSpeech.adaptivefilter import BaseFilter, awgn
 
 
 class Rls(BaseFilter):
-    def __init__(self, filter_len=1024, mu=0.1, forgetting_factor=0.9998, normalization=True):
+    def __init__(self, filter_len=1024, mu=0.5, forgetting_factor=0.9998, delta=1e-3, normalization=True):
         BaseFilter.__init__(self, filter_len=filter_len, mu=mu)
 
         self.norm = normalization
 
-        self.P = np.eye(self.filter_len) * 1 / 1e-3
+        self.P = np.eye(self.filter_len) * 1 / delta
         self.forgetting_factor = forgetting_factor
+        self.forgetting_factor_inv = 1.0 / self.forgetting_factor
 
     def update(self, x_n, d_n, alpha=1e-4):
         self.update_input(x_n)
@@ -33,7 +34,7 @@ class Rls(BaseFilter):
         kn = num / (self.forgetting_factor + self.input_buffer.T @ num)
 
         # update inversion matrix
-        self.P = (self.P - kn @ self.input_buffer.T @ self.P) / self.forgetting_factor
+        self.P = (self.P - kn @ self.input_buffer.T @ self.P) * self.forgetting_factor_inv
 
         grad = err * kn
         self.update_coef(grad)
