@@ -32,11 +32,10 @@ class MicArray(object):
         self.tau = np.zeros((self.M, 1))
         self.omega = 2 * np.pi * self.freq_bin * self.fs / self.n_fft
 
-        self.array_sim = ArraySim(arrayType, spacing=r, M=M)
-
         self.array_type = arrayType
         self.mic_loc = np.zeros((M, 3))
         self.mic_loc = self.array_init()
+        self.array_sim = ArraySim(coordinate=self.mic_loc)
 
         """
         # %                   ^ +z
