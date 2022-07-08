@@ -221,11 +221,11 @@ class DelayFrames(object):
 
 
 class DelaySamples(object):
-    def __init__(self, data_len, delay, channel=1):
+    def __init__(self, data_len, delay, channel=1, dtype=np.float64):
         self.data_len = data_len
         self.n_delay = delay
 
-        self.buffer = np.zeros(((data_len + delay), channel))
+        self.buffer = np.zeros(((data_len + delay), channel), dtype=dtype)
 
     def delay(self, x):
         """
