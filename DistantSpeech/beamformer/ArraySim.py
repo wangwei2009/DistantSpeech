@@ -114,7 +114,7 @@ def callback_mix(premix, snr=0, sir=0, ref_mic=0, n_src=None, n_tgt=None):
 
 
 class ArraySim(object):
-    def __init__(self, array_type="linear", M=3, spacing=0.032, coordinate=None, fs=16000):
+    def __init__(self, array_type="linear", M=3, spacing=0.032, coordinate=None, fs=16000, energy_absorption=0.7):
         assert array_type in ["linear", "circular", "arbitrary"]
 
         self.corners = np.array([[0, 0], [0, 3], [5, 3], [5, 0]]).T  # [x,y]
@@ -127,7 +127,7 @@ class ArraySim(object):
         self.center_loc[2] = 0.5
 
         if coordinate is not None:
-            self.R = coordinate
+            self.R = coordinate.T + self.center_loc[:, None]
         else:
             if array_type == 'linear':
                 self.R = linear_3d_array(self.center_loc, M, 0, spacing)
@@ -139,7 +139,7 @@ class ArraySim(object):
             self.corners,
             fs=fs,
             max_order=3,
-            materials=pra.Material(0.7, 0.15),
+            materials=pra.Material(energy_absorption, 0.15),
             ray_tracing=True,
             air_absorption=True,
         )
