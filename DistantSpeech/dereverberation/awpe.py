@@ -57,9 +57,11 @@ class Wpe(SubbandAF):
             self.P[band, ...] = np.eye(self.filter_len * self.channels, dtype=complex) / 1e-3
 
         self.DelayObj = []
-        self.D = 2
+        self.D = 4
         for k in range(self.half_band):
             self.DelayObj.append(DelaySamples(self.filter_len, self.D, channel=self.channels, dtype=complex))
+
+        self.var = np.zeros((self.half_band, 1))
 
     def update_input(self, xt):
         """_summary_
@@ -103,28 +105,33 @@ class Wpe(SubbandAF):
 
     def update(self, x_n, alpha=1e-4, p=None):
         self.return_td = False
+        # print(x_n.shape)
 
         d_n = self.update_input_data(x_n, x_n, alpha=alpha, p=p)
+        # print(d_n.shape)
 
         input_buffer_delayed = self.delay_input(self.DelayObj, self.input_buffer)
 
         X = np.reshape(input_buffer_delayed, (self.half_band, -1))  # [k, C*N]
 
-        filter_output = self.compute_filter_output(self.W, X)  # [K,C]
+        filter_output = filter_output = np.einsum('kmi, ki->km', self.W, X)
 
         # prior error
         err = d_n - filter_output  # [K,C]
+
+        alpha = 0.92
+        self.var = alpha * self.var + (1 - alpha) * np.abs(d_n[:, 0:1] * d_n[:, 0:1].conj())
 
         # gain vector
         num = np.einsum('kij, kj->ki', self.P, X.conj())  # [K, C*N, C*N] * [K, C*N] -> [K, C*N]
         kn = num / (
             # self.forgetting_factor + np.einsum('ijk, ijk->ik', self.input_buffer[..., None], num)
-            self.forgetting_factor
+            self.forgetting_factor * self.var
             + np.sum(X * num, axis=-1, keepdims=True)
         )  # [k, C*N]
 
         # update inversion matrix
-        self.P = (self.P - kn[..., None] @ X[:, None, :].conj() @ self.P) * self.forgetting_factor_inv
+        self.P = (self.P - kn[..., None] @ X[:, None, :] @ self.P) * self.forgetting_factor_inv
 
         for ch in range(self.channels):
             self.W[:, ch, ch * self.filter_len : (ch + 1) * self.filter_len] = (
@@ -159,3 +166,17 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     main(args)
+
+    # delay_obj = DelaySamples(10, 4, channel=1, dtype=complex)
+
+    # x = np.random.rand(30, 1)
+    # y = np.random.rand(30, 1)
+    # print(x)
+
+    # for n in range(3):
+    #     xn = x[n * 10 : n * 10 + 10]
+    #     y[n * 10 : n * 10 + 10] = delay_obj.delay(xn)
+
+    # # y = delay_obj.delay(x)
+    # print(y.shape)
+    # print(y)
