@@ -228,17 +228,55 @@ class DelaySamples(object):
         self.buffer = np.zeros(((data_len + delay), channel), dtype=dtype)
 
     def delay(self, x):
-        """
-        delay x for self.delay point
-        :param x: (n_samples,) or (n_samples, n_chs)
-        :return:
+        """_summary_
+
+        Parameters
+        ----------
+        x : np.array, (n_samples,) or (n_samples, n_chs)
+            input data
+
+        Retruns
+        ----------
+        output : np.array, (n_samples, n_chs)
+            delayed input
+
+
         """
         if len(x.shape) == 1:
             x = x[:, np.newaxis]
         data_len = x.shape[0]
 
-        self.buffer[-data_len:, :] = x
-        output = self.buffer[:data_len, :].copy()
-        self.buffer[: self.n_delay, :] = self.buffer[-self.n_delay :, :]
+        if self.n_delay == 0:
+            return x
+        else:
+            self.buffer[-data_len:, :] = x
+            output = self.buffer[:data_len, :].copy()
+            self.buffer[: self.n_delay, :] = self.buffer[-self.n_delay :, :]
 
         return output
+
+
+def test_delaysamples():
+    for ch in range(2):
+        for data_len in [1, 10, 100]:
+            for delay in [0, 1, 5, 50, 150]:
+                delay_obj = DelaySamples(data_len, delay, channel=ch)
+
+                x = np.random.rand(1000, ch)
+                y = np.random.rand(1000, ch)
+
+                for n in range(x.shape[0] // data_len):
+                    xn = x[n * data_len : n * data_len + data_len, :]
+                    y[n * data_len : n * data_len + data_len, :] = delay_obj.delay(xn)
+
+                if delay == 0:
+                    assert np.sum(np.abs(y - x)) < 1e-5, "delay error when data_len={}, delay={}".format(
+                        data_len, delay
+                    )
+                else:
+                    assert np.sum(np.abs(y[delay:] - x[:-delay])) < 1e-5
+
+
+if __name__ == "__main__":
+
+    test_delaysamples()
