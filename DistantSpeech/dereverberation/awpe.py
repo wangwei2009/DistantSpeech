@@ -18,6 +18,7 @@ class Wpe(SubbandAF):
         filter_len=2,
         num_bands=512,
         forgetting_factor=0.998,
+        delay=4,
         mu=0.5,
         normalization=True,
         alpha=0.9,
@@ -40,7 +41,7 @@ class Wpe(SubbandAF):
         self.channels = channels
 
         self.input_buffer = np.zeros((self.half_band, self.channels, filter_len), dtype=complex)
-        self.input_buffer_delayed = np.zeros((self.half_band, self.channels, filter_len), dtype=complex)
+        self.input_buffer_delayed = np.zeros((self.half_band, self.channels), dtype=complex)
 
         self.W = np.zeros((self.half_band, self.channels, self.channels * filter_len), dtype=complex)
 
@@ -54,16 +55,17 @@ class Wpe(SubbandAF):
             (self.half_band, self.filter_len * self.channels, self.filter_len * self.channels), dtype=complex
         )
         for band in range(self.half_band):
-            self.P[band, ...] = np.eye(self.filter_len * self.channels, dtype=complex) / 1e-3
+            self.P[band, ...] = np.eye(self.filter_len * self.channels, dtype=complex) * 1e-3
 
-        self.DelayObj = []
-        self.D = 4
-        for k in range(self.half_band):
-            self.DelayObj.append(DelaySamples(self.filter_len, self.D, channel=self.channels, dtype=complex))
+        self.D = delay
+        self.DelayObj = DelaySamples(self.hop_length, int(self.D * self.hop_length), channel=self.channels)
+        # self.DelayObj = []
+        # for k in range(self.half_band):
+        #     self.DelayObj.append(DelaySamples(self.half_band, self.D, channel=self.channels, dtype=complex))
 
         self.var = np.zeros((self.half_band, 1))
 
-    def update_input(self, xt):
+    def buffer_input(self, xt):
         """_summary_
 
         Parameters
@@ -79,9 +81,12 @@ class Wpe(SubbandAF):
             _description_
         """
         # update input buffer
-        for ch in range(self.channels):
-            self.input_buffer[:, ch, 1:] = self.input_buffer[:, ch, :-1]
-            self.input_buffer[:, ch, 0] = xt[:, ch]
+        if self.filter_len == 1:
+            self.input_buffer[:, :, 0] = xt
+        else:
+            for ch in range(self.channels):
+                self.input_buffer[:, ch, 1:] = self.input_buffer[:, ch, :-1]
+                self.input_buffer[:, ch, 0] = xt[:, ch]
 
         return self.input_buffer
 
@@ -103,18 +108,42 @@ class Wpe(SubbandAF):
 
         return self.input_buffer_delayed
 
+    def delay_input_data(self, DelayObj, x_n):
+        for k in range(self.half_band):
+            x_n_k_delayed = DelayObj[k].delay(x_n)
+            self.input_buffer_delayed[k, ...] = x_n_k_delayed
+
+        return self.input_buffer_delayed
+
     def update(self, x_n, alpha=1e-4, p=None):
+        """WPE update function
+
+        Parameters
+        ----------
+        x_n : np.array, float64, [sapmes, ch]
+            input data
+        alpha : _type_, optional
+            _description_, by default 1e-4
+        p : _type_, optional
+            _description_, by default None
+
+        Returns
+        -------
+        _type_
+            _description_
+        """
         self.return_td = False
-        # print(x_n.shape)
 
-        d_n = self.update_input_data(x_n, x_n, alpha=alpha, p=p)
-        # print(d_n.shape)
+        x_n_td_delayed = self.DelayObj.delay(x_n)
 
-        input_buffer_delayed = self.delay_input(self.DelayObj, self.input_buffer)
+        x_n_delayed, d_n = self.check_input_data(x_n_td_delayed, x_n)
 
-        X = np.reshape(input_buffer_delayed, (self.half_band, -1))  # [k, C*N]
+        input_delayed_buffer = self.buffer_input(x_n_delayed)
+        # print(input_delayed_buffer.shape)
 
-        filter_output = filter_output = np.einsum('kmi, ki->km', self.W, X)
+        X = np.reshape(input_delayed_buffer, (self.half_band, -1))  # [k, C*N]
+
+        filter_output = np.einsum('kmi, ki->km', self.W, X)
 
         # prior error
         err = d_n - filter_output  # [K,C]
@@ -134,29 +163,40 @@ class Wpe(SubbandAF):
         self.P = (self.P - kn[..., None] @ X[:, None, :] @ self.P) * self.forgetting_factor_inv
 
         for ch in range(self.channels):
-            self.W[:, ch, ch * self.filter_len : (ch + 1) * self.filter_len] = (
-                self.W[:, ch, ch * self.filter_len : (ch + 1) * self.filter_len]
-                + err[:, ch : ch + 1] * kn[:, ch * self.filter_len : (ch + 1) * self.filter_len]
-            )
+            self.W[:, ch, :] = self.W[:, ch, :] + err[:, ch : ch + 1] * kn
 
         if self.return_td:
-            err = self.transform_d.synthesis(err[:, 0])
+            output = self.transform_d.synthesis(err[:, 0])
 
-        return err, self.W
+        return output, self.W
 
 
 def main(args):
 
-    x = np.random.rand(16000 * 5, 2)
-    d = np.random.rand(16000 * 5, 2)
+    ch = 4
+    x = np.random.rand(16000 * 5, ch)
 
-    wpe = Wpe(filter_len=3)
+    n_fft = 512
+    hop_length = 128
+    wpe = Wpe(filter_len=2, delay=1, channels=ch, num_bands=n_fft, hop_length=hop_length)
 
-    for n in tqdm(range(len(x) - wpe.transform_x.hop_length)):
-        if np.mod(n, wpe.transform_x.hop_length) == 0:
-            input_vector = x[n : n + wpe.transform_x.hop_length, :]
-            d_vector = d[n : n + wpe.transform_x.hop_length, :]
-            err, w_rls = wpe.update(input_vector, d_vector)
+    for n in tqdm(range(len(x) - hop_length)):
+        if np.mod(n, hop_length) == 0:
+            input_vector = x[n : n + hop_length, :]
+            err, w_rls = wpe.update(input_vector)
+
+
+def check_func1():
+    a = np.random.rand(2, 3, 5)
+    b = np.random.rand(2, 5)
+    c = np.einsum('kmi,ki->km', a, b)
+    print(c)
+
+    filter_output = np.zeros((2, 3))
+    for k in range(2):
+        for ch in range(3):
+            filter_output[k, ch] = np.sum(a[k, ch] * b[k])
+    print(filter_output)
 
 
 if __name__ == "__main__":
@@ -166,17 +206,3 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     main(args)
-
-    # delay_obj = DelaySamples(10, 4, channel=1, dtype=complex)
-
-    # x = np.random.rand(30, 1)
-    # y = np.random.rand(30, 1)
-    # print(x)
-
-    # for n in range(3):
-    #     xn = x[n * 10 : n * 10 + 10]
-    #     y[n * 10 : n * 10 + 10] = delay_obj.delay(xn)
-
-    # # y = delay_obj.delay(x)
-    # print(y.shape)
-    # print(y)
