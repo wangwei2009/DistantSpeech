@@ -26,8 +26,8 @@ class Subband(object):
         M = n_fft
         # m = 2  # Prototype filter length factor
         self.h, self.g = self.design_prototype_filter(n_fft, m, r=r)
-        print('self.h:{}'.format(self.h.shape))
-        print('self.g:{}'.format(self.g.shape))
+        # print('self.h:{}'.format(self.h.shape))
+        # print('self.g:{}'.format(self.g.shape))
 
         self.first_frame = 1
         if window is not None:
