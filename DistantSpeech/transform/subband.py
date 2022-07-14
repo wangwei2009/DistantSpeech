@@ -38,7 +38,7 @@ class Subband(object):
         self.half_bin = int(self.n_fft / 2 + 1)
         self.D = 2
 
-        self.win_len = self.window.shape[0]
+        self.win_len = self.h.shape[0]
 
         self.overlap = self.win_len - self.hop_length
         self.previous_input = np.zeros((self.overlap, self.channel))
@@ -61,11 +61,11 @@ class Subband(object):
         synthesis_filename = os.path.join(outputdir, 'g-M%d-m%d-r%d.pickle' % (M, m, r))
         if os.path.exists(analysis_filename) and os.path.exists(synthesis_filename):
             with open(analysis_filename, 'rb') as fp:
-                print('Loading analysis prototype from \'%s\'' % analysis_filename)
+                # print('Loading analysis prototype from \'%s\'' % analysis_filename)
                 h = pickle.load(fp)
             # Read synthesis prototype 'g'
             with open(synthesis_filename, 'rb') as fp:
-                print('Loading synthesis prototype from \'%s\'' % synthesis_filename)
+                # print('Loading synthesis prototype from \'%s\'' % synthesis_filename)
                 g = pickle.load(fp)
         else:
             (h, beta) = design_Nyquist_analyasis_filter_prototype(M, m, D)
@@ -120,7 +120,7 @@ class Subband(object):
                 x_sumed = np.sum(np.reshape(windowed, (self.D, -1)), axis=0)
                 Y[:, n, ch] = np.fft.rfft(x_sumed)
 
-        self.previous_input[:, ch] = x[-self.overlap :, ch]
+            self.previous_input[:, ch] = x[-self.overlap :, ch]
 
         return np.squeeze(Y)
 
@@ -171,32 +171,31 @@ class Subband(object):
 
 if __name__ == "__main__":
     from DistantSpeech.beamformer.utils import mesh
+    from DistantSpeech.beamformer.utils import load_audio as audioread
+    from DistantSpeech.beamformer.utils import save_audio as audiowrite
+    from tqdm import tqdm
 
     filename = "DistantSpeech/transform/speech1.wav"
-    data, sr = librosa.load(filename, sr=None)
+    x, sr = librosa.load(filename, sr=None)
+    print(x.shape)
+    x_ch2 = np.vstack((x, x)).T
+    print(x_ch2.shape)
 
-    data_recon = np.zeros(len(data))
-    t = 0
-    frame_length = 128
-    stream = librosa.stream(
-        filename,
-        block_length=1,
-        frame_length=frame_length,
-        hop_length=frame_length,
-        mono=True,
-    )
-    transform = Subband(n_fft=512, hop_length=128)
-    n_frames = int((data.shape[0]) / 128)
-    print('n_frames:{}'.format(n_frames))
-    mag_data = np.zeros((257, n_frames + 1))
-    for y_block in stream:
-        if len(y_block) >= 128:
-            D = transform.analysis(y_block)  # [half_bin, n_frame]
-            mag_data[:, t] = np.abs(D)
-            # d = transform.istft(D)
-            # data_recon[t * frame_length : (t + 1) * frame_length] = d
-        t = t + 1
-    mesh()
+    n_fft = 512
+    hop_length = 128
+    transform = Subband(n_fft=512, hop_length=128, channel=2)
+
+    data_recon = np.zeros(x.shape)
+
+    for n in tqdm(range(len(x) - hop_length)):
+        if np.mod(n, hop_length) == 0:
+            input_vector = x_ch2[n : n + hop_length, :]
+            X = transform.analysis(input_vector)
+            x_rec = transform.synthesis(X[:, 0])
+            data_recon[n : n + hop_length] = x_rec
+
+    audiowrite('/home/wangwei/work/DistantSpeech/example/wpe/speech1_rec.wav', data_recon)
+    # mesh()
 
     # compare difference between original signal and reconstruction signal
     # plt.figure()
