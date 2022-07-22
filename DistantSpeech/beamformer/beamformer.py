@@ -160,7 +160,16 @@ class beamformer(object):
     beamformer base class
     """
 
-    def __init__(self, mic=MicArray, frame_len=256, hop=None, nfft=None, c=343, r=0.032, fs=16000):
+    def __init__(
+        self,
+        mic: MicArray,
+        frame_len=256,
+        hop=None,
+        nfft=None,
+        c=343,
+        r=0.032,
+        fs=16000,
+    ):
         self.MicArray = mic
         self.M = mic.M
 
@@ -190,13 +199,25 @@ class beamformer(object):
             self.Rss[:, :, k] = np.eye(self.M, dtype=complex)
             self.Rnn[:, :, k] = np.eye(self.M, dtype=complex)
 
+        self.W = np.zeros((self.half_bin, self.M), dtype=complex)
+
         # generate diffuse model
         self.Fvv = gen_noise_msc(mic=self.MicArray, M=self.M, r=self.r, nfft=self.nfft, fs=self.fs, c=self.c)
 
         self.transformer = Transform(n_fft=self.nfft, hop_length=self.hop, channel=self.M)
+        self.transform = Transform(n_fft=self.nfft, hop_length=self.hop, channel=self.M)
 
-    def get_steering_vector(self):
-        pass
+    def compute_steering_vector_from_doa(self, look_angle=(0, 0)):
+        mic_array = self.MicArray
+
+        look_angle_rad = np.array(look_angle) / 180 * np.pi
+
+        tau0 = compute_tau(mic_array, look_angle_rad)
+        a0 = np.zeros((self.half_bin, self.M), dtype=complex)
+        for k in range(0, mic_array.half_bin):
+            a0[k : k + 1, :] = np.exp(-1j * self.omega[k] * tau0).T
+
+        return a0
 
     def get_covariance(self):
         pass
@@ -245,6 +266,72 @@ class beamformer(object):
             raise ValueError("Unknown beamformer weights: %s" % weightType)
         return weights
 
+    def compute_weights(self, Xn, a=None, weightType="DS", Rvv=None, Rvv_inv=None, Ryy=None, Diagonal=1e-3):
+
+        weights = np.zeros((self.half_bin, self.M), dtype=complex)
+
+        return weights
+
+    def process_freframe(self, X_n):
+        """processe single frame in subband
+           override this function if you have different process pipline
+
+        Parameters
+        ----------
+        X_n : np.array, complex array, [bins, C]
+            multichannel frequency frame
+
+        Returns
+        -------
+        Yf : np.array, [bins,]
+            processed frame
+        """
+
+        half_bin, channel = np.zeros(X_n.shape)
+
+        self.W = self.compute_weights(X_n)
+
+        # apply weights
+        Yf = np.einsum('ij, ij->i', self.W.conj(), X_n)
+
+        return Yf
+
+    def process(self, x):
+        """process core function,
+           override this function if you have different process pipline
+
+        Parameters
+        ----------
+        x : np.array, [samples, channel]
+            time-domain multichannel input chunk signal
+
+        Returns
+        -------
+        output : np.array, [samples, ]
+            enhanced time-domain single channel signal
+        """
+
+        assert x.shape[1] >= 2
+
+        D = self.transform.stft(x)
+
+        half_bin, frameNum, channel = D.shape
+
+        # enhanced single channel spectrum
+        Yf = np.zeros((half_bin, frameNum, 1), dtype=complex)
+
+        # frame online processing block
+        for n in range(frameNum):
+            X_n = D[:, n, :]
+
+            Yf[:, n, 0] = self.process_freframe(X_n)
+
+        output = self.transform.istft(Yf)
+
+        assert output.shape[0] == x.shape[0]
+
+        return output.squeeze()
+
     def calcWNG(self, ak, Hk):
         """
         calculate White Noise Gain per frequency bin
@@ -264,7 +351,7 @@ class beamformer(object):
         return 10 * np.log10(WNG)
 
     def compute_beampattern(self, mic_array: MicArray, weights=None, look_angle=np.array([0, 0]) / 180 * np.pi):
-        """_summary_
+        """compute beampattern give weights or look angle
 
         Parameters
         ----------
@@ -272,22 +359,24 @@ class beamformer(object):
             mic array object
         weights : np.array, [M, half_bin], optional
             beamformer complex weights, if not given, use delay and sum weight, by default None
-        look_angle : np.array, optional
-            look angle, by default np.array([0, 0])/180*np.pi
+        look_angle : list or tuple, optional
+            look angle in degree, by default [0, 0]
 
         Returns
         -------
         beamout: np.array, [360, half_bin]
             2-d beampattern
         """
-        tau0 = compute_tau(mic_array, look_angle)
+        if weights is None:
+            look_angle_rad = np.array(look_angle) / 180 * np.pi
+            tau0 = compute_tau(mic_array, look_angle_rad)
         beamout = np.zeros([360, mic_array.half_bin])
         H = weights if weights is not None else np.zeros((mic_array.M, mic_array.half_bin), dtype=complex)
         for az in range(0, 360, 1):
-            tau = compute_tau(mic_array, np.array([az * np.pi / 180, 0]))
+            tau = compute_tau(mic_array, np.array([az, 0]) * np.pi / 180)
             for k in range(0, mic_array.half_bin):
-                a0 = np.exp(-1j * self.omega[k] * tau0)
                 if weights is None:
+                    a0 = np.exp(-1j * self.omega[k] * tau0)
                     H[:, k : k + 1] = self.getweights(a0, weightType="DS")
                 a = np.exp(-1j * self.omega[k] * tau)
                 beamout[az, k] = np.abs(np.squeeze(H[:, k : k + 1].conj().T @ a))
@@ -326,7 +415,7 @@ if __name__ == "__main__":
     fs = sr
 
     MicArrayObj = MicArray(arrayType="linear", r=r, M=10)
-    angle = np.array([90, 0]) / 180 * np.pi  # look angle
+    angle = [90, 0]  # look angle
 
     beamformer_obj = beamformer(MicArrayObj, frameLen, hop, nfft, c, fs)
 
