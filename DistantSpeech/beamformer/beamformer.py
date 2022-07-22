@@ -202,12 +202,24 @@ class beamformer(object):
         self.W = np.zeros((self.half_bin, self.M), dtype=complex)
 
         # generate diffuse model
-        self.Fvv = gen_noise_msc(mic=self.MicArray, M=self.M, r=self.r, nfft=self.nfft, fs=self.fs, c=self.c)
+        self.Fvv = gen_noise_msc(mic=self.MicArray, nfft=self.nfft, fs=self.fs, c=self.c)
 
         self.transformer = Transform(n_fft=self.nfft, hop_length=self.hop, channel=self.M)
         self.transform = Transform(n_fft=self.nfft, hop_length=self.hop, channel=self.M)
 
     def compute_steering_vector_from_doa(self, look_angle=(0, 0)):
+        """compute steer vector given doa
+
+        Parameters
+        ----------
+        look_angle : tuple, optional
+            look direction, by default (0, 0), in degree
+
+        Returns
+        -------
+        a0 : steer vector, [bins, channel]
+            delay only steer vector
+        """
         mic_array = self.MicArray
 
         look_angle_rad = np.array(look_angle) / 180 * np.pi
@@ -266,11 +278,42 @@ class beamformer(object):
             raise ValueError("Unknown beamformer weights: %s" % weightType)
         return weights
 
-    def compute_weights(self, Xn, a=None, weightType="DS", Rvv=None, Rvv_inv=None, Ryy=None, Diagonal=1e-3):
+    def compute_weights(
+        self,
+        look_angle=[90, 0],
+        weightType="DS",
+        diag_value=1e-3,
+    ):
+        """compute beamformer weights
 
-        weights = np.zeros((self.half_bin, self.M), dtype=complex)
+        Parameters
+        ----------
+        look_angle : list or tuple, optional
+            look angle in degree, by default [90, 0]
+        weightType : str, optional
+            fixedbeamformer type in ['DS', 'SD'], by default "DS"
+        diag_value : float, optional
+            diag value, by default 1e-6
 
-        return weights
+        Returns
+        -------
+        w: complex weights, [bins, M]
+            fixedbeamformer weights
+        """
+
+        look_angle_rad = np.array(look_angle) / 180 * np.pi
+
+        a0 = self.compute_steering_vector_from_doa(look_angle=look_angle)
+
+        if weightType == 'DS':
+            W = a0 / self.M
+
+        if weightType == 'SD':
+            diag = np.eye(self.M) * diag_value
+            diag_bin = np.broadcast_to(diag, (self.half_bin, self.M, self.M))
+            W = compute_mvdr_weight(a0, np.linalg.inv(self.Fvv + diag_bin))
+
+        return W
 
     def process_freframe(self, X_n):
         """processe single frame in subband
@@ -332,23 +375,73 @@ class beamformer(object):
 
         return output.squeeze()
 
-    def calcWNG(self, ak, Hk):
+    def compute_array_gain(self, weights, steer_vector, Rvv, return_db=False):
+        """compute array gain
+
+        Parameters
+        ----------
+        weights : np.array, [bins, M]
+            beamformer weights
+        steer_vector : np.array. [bins, M]
+            steer weights
+        Rvv : np.array, [bins, M, M]
+            noise spatial correlation matrix
+
+        Returns
+        -------
+        G : np.array, [bins,]
+            array gain
         """
-        calculate White Noise Gain per frequency bin
 
+        num = np.einsum('ij, ij->i', weights.conj(), steer_vector)
+        den = weights[:, np.newaxis, :].conj() @ Rvv @ weights[..., None]
+
+        G = np.abs(num[..., None]) ** 2 / np.abs(den)
+
+        if return_db:
+            G = 10 * np.log10(G + 1e-6)
+
+        return G.squeeze()
+
+    def compute_wng_di(self, weights=None, look_angle=[0, 0], return_db=True):
+        """compute WNG and DI given weights and angle
+
+        Parameters
+        ----------
+        weights : np.array, [bins, M], optional
+            beamformer weights, by default None
+        look_angle : list, optional
+            look direction, by default [0, 0]
+        return_db : bool, optional
+            _description_, by default True
+
+        Returns
+        -------
+        wng : np.array, [bins,]
+            White Noise Gain
+        di  : np.array, [bins,]
+            Directive Index
         """
-        WNG = np.squeeze(np.abs(Hk.conj().T @ ak) ** 2 / np.real((Hk.conj().T @ Hk)))
 
-        return 10 * np.log10(WNG)
+        if weights is None:
+            weights = self.compute_weights(look_angle=look_angle)
 
-    def calcDI(self, ak, Hk, Fvvk):
-        """
-        calculate directive index per frequency bin
+        steer_vector = self.compute_steering_vector_from_doa(look_angle=look_angle)
 
-        """
-        WNG = np.squeeze(np.abs(Hk.conj().T @ ak) ** 2 / np.real((Hk.conj().T @ Fvvk @ Hk)))
+        # array gain under diffuse noise field
+        di = self.compute_array_gain(weights, steer_vector, self.Fvv)
 
-        return 10 * np.log10(WNG)
+        # array gain under white noise field
+        Fvv = np.zeros((self.half_bin, self.M, self.M))
+        for k in range(self.half_bin):
+            Fvv[k] = np.eye(self.M)
+        wng = self.compute_array_gain(weights, steer_vector, Fvv)
+
+        if return_db:
+            wng = 10 * np.log10(wng + 1e-6)
+            di = 10 * np.log10(di + 1e-6)
+
+        return wng, di
 
     def compute_beampattern(self, mic_array: MicArray, weights=None, look_angle=np.array([0, 0]) / 180 * np.pi):
         """compute beampattern give weights or look angle
