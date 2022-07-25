@@ -1,3 +1,17 @@
+"""
+WPE dereverberation
+==============
+
+----------
+
+
+.. [1] RLS-Based Adaptive Dereverberation Tracing Abrupt Position Change of Target Speaker.
+.. [2] "Dereverberation for reverberation-robust microphone arrays," 21st European Signal Processing Conference (EUSIPCO 2013), 2013, pp. 1-5.
+.. [3] Adaptive Multichannel Dereverberation for Automatic Speech Recognition
+
+"""
+
+from tkinter.tix import Tree
 import numpy as np
 import argparse
 from scipy.signal import convolve as conv
@@ -48,8 +62,8 @@ class Wpe(SubbandAF):
         self.forgetting_factor = forgetting_factor
         self.forgetting_factor_inv = 1.0 / self.forgetting_factor
 
-        self.transform_x = Transform(n_fft=num_bands, hop_length=self.hop_length, channel=self.channels)
-        self.transform_d = Transform(n_fft=num_bands, hop_length=self.hop_length, channel=self.channels)
+        self.transform_x = Subband(n_fft=num_bands, hop_length=self.hop_length, channel=self.channels)
+        self.transform_d = Subband(n_fft=num_bands, hop_length=self.hop_length, channel=self.channels)
 
         self.P = np.zeros(
             (self.half_band, self.filter_len * self.channels, self.filter_len * self.channels), dtype=complex
@@ -59,9 +73,6 @@ class Wpe(SubbandAF):
 
         self.D = delay
         self.DelayObj = DelaySamples(self.hop_length, int(self.D * self.hop_length), channel=self.channels)
-        # self.DelayObj = []
-        # for k in range(self.half_band):
-        #     self.DelayObj.append(DelaySamples(self.half_band, self.D, channel=self.channels, dtype=complex))
 
         self.var = np.zeros((self.half_band, 1))
 
@@ -139,31 +150,41 @@ class Wpe(SubbandAF):
         x_n_delayed, d_n = self.check_input_data(x_n_td_delayed, x_n)
 
         input_delayed_buffer = self.buffer_input(x_n_delayed)
-        # print(input_delayed_buffer.shape)
 
         X = np.reshape(input_delayed_buffer, (self.half_band, -1))  # [k, C*N]
 
-        filter_output = np.einsum('kmi, ki->km', self.W, X)
+        filter_output = np.einsum('kmi, ki->km', self.W.conj(), X)
 
         # prior error
         err = d_n - filter_output  # [K,C]
 
-        alpha = 0.92
-        self.var = alpha * self.var + (1 - alpha) * np.abs(d_n[:, 0:1] * d_n[:, 0:1].conj())
+        alpha = 0.98
+        var_n = np.abs(np.einsum('ij, ij->i', d_n.conj(), d_n)) / self.channels
+        self.var = alpha * self.var + (1 - alpha) * var_n[:, None]
+        # self.var = alpha * self.var + (1 - alpha) * np.abs(d_n[:, 0:1] * d_n[:, 0:1].conj())
 
-        # gain vector
-        num = np.einsum('kij, kj->ki', self.P, X.conj())  # [K, C*N, C*N] * [K, C*N] -> [K, C*N]
-        kn = num / (
-            # self.forgetting_factor + np.einsum('ijk, ijk->ik', self.input_buffer[..., None], num)
-            self.forgetting_factor * self.var
-            + np.sum(X * num, axis=-1, keepdims=True)
-        )  # [k, C*N]
+        if 0:
+            # nlms
+            for ch in range(self.channels):
+                self.W[:, ch, :] = self.W[:, ch, :] + err[:, ch : ch + 1].conj() * X / (self.var + 1e-6) * self.mu
+        else:
+            # gain vector
+            num = np.einsum('kij, kj->ki', self.P, X)  # [K, C*N, C*N] * [K, C*N] -> [K, C*N]
+            kn = num / (
+                # self.forgetting_factor * self.var
+                # + np.einsum('ij, ij->i', X.conj(), num)[..., None]
+                self.forgetting_factor * self.var
+                + np.sum(X.conj() * num, axis=-1, keepdims=True)
+            )  # [k, C*N]
 
-        # update inversion matrix
-        self.P = (self.P - kn[..., None] @ X[:, None, :] @ self.P) * self.forgetting_factor_inv
+            # update inversion matrix
+            self.P = (
+                self.P - np.einsum('ij,il,ilk->ijk', kn, X.conj(), self.P, optimize=True)
+            ) * self.forgetting_factor_inv
+            # self.P = (self.P - kn[..., None] @ X[:, None, :].conj() @ self.P) * self.forgetting_factor_inv
 
-        for ch in range(self.channels):
-            self.W[:, ch, :] = self.W[:, ch, :] + err[:, ch : ch + 1] * kn
+            for ch in range(self.channels):
+                self.W[:, ch, :] = self.W[:, ch, :] + err[:, ch : ch + 1].conj() * kn
 
         if self.return_td:
             output = self.transform_d.synthesis(err[:, 0])
@@ -176,8 +197,8 @@ def main(args):
     ch = 4
     x = np.random.rand(16000 * 5, ch)
 
-    n_fft = 512
-    hop_length = 128
+    n_fft = 256
+    hop_length = 64
     wpe = Wpe(filter_len=2, delay=1, channels=ch, num_bands=n_fft, hop_length=hop_length)
 
     for n in tqdm(range(len(x) - hop_length)):
