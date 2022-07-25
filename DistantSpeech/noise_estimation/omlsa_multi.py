@@ -33,7 +33,7 @@ class NsOmlsaMulti(NoiseEstimationBase):
         self.G_H1 = np.ones(self.half_bin)
         self.G = np.ones(self.half_bin)
         self.Gmin = -12
-        self.Gmin = np.power(10, (self.Gmin/10))
+        self.Gmin = np.power(10, (self.Gmin / 10))
 
         self.gamma = np.ones(self.half_bin)
         self.zeta_Y = np.ones(self.half_bin)  # smoothed fixed bf
@@ -53,7 +53,7 @@ class NsOmlsaMulti(NoiseEstimationBase):
         self.q_min = 1e-6
         self.q_max = 0.9999998
 
-        self.alpha_d = 0.85                  # smooth factor for p
+        self.alpha_d = 0.85  # smooth factor for p
 
         self.xi_hat = np.ones(self.half_bin)
 
@@ -74,8 +74,8 @@ class NsOmlsaMulti(NoiseEstimationBase):
         """
         multi-channel omlsa noise estimation
         :param y: length of half_bin, beamformer output
-        :param u: [M-1, half_bin], M-1 channels of block matrix output
-        :return: 
+        :param u: [half_bin, M-1], M-1 channels of block matrix output
+        :return:
         """
 
         assert len(y) == self.half_bin
@@ -89,7 +89,7 @@ class NsOmlsaMulti(NoiseEstimationBase):
             self.lambda_d = y
 
             self.zeta_Y = y
-            for ch in range(self.M-1):
+            for ch in range(self.M - 1):
                 self.zeta_U[ch, :] = u[:, ch]
         else:
 
@@ -99,19 +99,20 @@ class NsOmlsaMulti(NoiseEstimationBase):
             for ch in range(self.M - 1):
                 self.zeta_U[ch, :] = self.smooth_psd(u[:, ch], self.zeta_U[ch, :], self.win, self.alpha_s)
 
-            self.LAMBDA_Y = self.zeta_Y / self.MU_Y
+            self.LAMBDA_Y = self.zeta_Y / (self.MU_Y + 1e-6)
             self.LAMBDA_U = np.max(self.zeta_U / self.MU_U, axis=0)
 
             # Eq.6 The transient beam - to - reference ratio(TBRR)
             eps = 0.01
-            self.Omega = np.maximum((self.zeta_Y - self.MU_Y), 0) / \
-                np.maximum(np.max(self.zeta_U - self.MU_U, axis=0), eps * self.MU_Y)
+            self.Omega = np.maximum((self.zeta_Y - self.MU_Y), 0) / np.maximum(
+                np.max(self.zeta_U - self.MU_U, axis=0), eps * self.MU_Y
+            )
             self.Omega = np.maximum(self.Omega, 0.1)
             self.Omega = np.minimum(self.Omega, 100)
 
             Bmin = 1.66
             # Eq.27 posteriori SNR at the beamformer output
-            self.gamma_s = np.minimum(y / (self.MU_Y * Bmin), 100)
+            self.gamma_s = np.minimum(y / (self.MU_Y * Bmin + 1e-6), 100)
 
             gamma_high = 0.1 * np.power(10, 2)
             gamma_low = 1
@@ -122,11 +123,13 @@ class NsOmlsaMulti(NoiseEstimationBase):
                 if self.gamma_s[k] < gamma_low or self.Omega[k] < Omega_low:
                     self.q_hat[k] = 1
                 else:
-                    self.q_hat[k] = max((gamma_high - self.gamma_s[k]) / (gamma_high - gamma_low),
-                                        (Omega_high - self.Omega[k]) / (Omega_high - Omega_low))
+                    self.q_hat[k] = max(
+                        (gamma_high - self.gamma_s[k]) / (gamma_high - gamma_low),
+                        (Omega_high - self.Omega[k]) / (Omega_high - Omega_low),
+                    )
                 self.q_hat[k] = min(max(self.q_hat[k], self.q_min), self.q_max)
 
-            gamma_pre = self.gamma
+            gamma_pre = self.gamma.copy()
             # posteriori SNR
             self.gamma = y / np.maximum(self.lambda_d, 1e-10)
 
@@ -161,9 +164,11 @@ def main(args):
     import time
     from scipy.io import wavfile
 
-    filepath = "./test_audio/rec1/"              # [u1,u2,u3,y]
-    filepath = "./test_audio/rec1_mcra_gsc/"     # [y,u1,u2,u3]
-    x, sr = load_wav(os.path.abspath(filepath))  # [channel, samples]
+    # filepath = "./test_audio/rec1/"  # [u1,u2,u3,y]
+    # filepath = "./test_audio/rec1_mcra_gsc/"  # [y,u1,u2,u3]
+    # x, sr = load_wav(os.path.abspath(filepath))  # [channel, samples]
+
+    x = np.random.rand(4, 16000 * 5)
     sr = 16000
     r = 0.032
     c = 343
@@ -181,7 +186,7 @@ def main(args):
 
     transform = Transform(n_fft=512, hop_length=256, channel=channel)
 
-    D = transform.stft(x.transpose())     # [F,T,Ch]
+    D = transform.stft(x.transpose())  # [F,T,Ch]
     Y, _ = transform.magphase(D, 2)
     print(Y.shape)
     pmesh(librosa.power_to_db(Y[:, :, -1]))
@@ -204,7 +209,7 @@ def main(args):
     end = time.process_time()
     print(end - start)
 
-    y = transform.istft(Yout)
+    y = transform.istft(Yout[..., None])
 
     pmesh(librosa.power_to_db(noise_psd))
     plt.savefig('noise_psd.png')
