@@ -431,7 +431,7 @@ class Transform(object):
         """
         streaming multi-channel Short Time Fourier Transform
         :param x: [samples, channels] or [samples,]
-        :return: [half_bin, frames, channels] or [half_bin, frames]
+        :return: [half_bin, frames, channels]
         """
         if len(x.shape) == 1:  # single channel
             x = x[:, np.newaxis]
@@ -450,29 +450,35 @@ class Transform(object):
             )  # [1 + n_fft/2, n_frames]
             self.previous_input[:, ch] = x[-self.overlap :, ch]
 
-        return np.squeeze(Y)
+        return Y
 
     def istft(self, Y):
         """
         streaming single channel inverse short time fourier transform
-        :param Y: [half_bin, frames]
-        :return: single channel time data
+        :param Y: [half_bin,] or [half_bin, frames] or [half_bin, frames, channels]
+        :return: time data, [samples, ] or [samples, ch]
         """
-        if len(Y.shape) == 1:  # single frame
-            Y = Y[:, np.newaxis]
-        x = istft(
-            Y,
-            hop_length=self.hop_length,
-            win_length=self.n_fft,
-            center=False,
-            window=self.window,
-        )
-        x[: self.overlap] += self.previous_output[:, 0]
-        self.previous_output[:, 0] = x[-self.overlap :]
+        if len(Y.shape) == 1:  # single frame, single channel
+            Y = Y[:, np.newaxis, np.newaxis]
+        if len(Y.shape) == 2:  # single frame
+            Y = Y[:, np.newaxis, :]
+        half_bin, n_frames, n_channels = Y.shape
+        assert n_channels <= self.channel
+        output = np.zeros((self.hop_length * n_frames, n_channels))
+        for ch in range(n_channels):
+            x = istft(
+                Y[:, :, ch],
+                hop_length=self.hop_length,
+                win_length=self.n_fft,
+                center=False,
+                window=self.window,
+            )
+            x[: self.overlap] += self.previous_output[:, ch]
+            self.previous_output[:, ch] = x[-self.overlap :]
 
-        output = x[: -self.overlap] * self.hop_length / self.W0
+            output[:, ch] = x[: -self.overlap] * self.hop_length / self.W0
 
-        return output
+        return output.squeeze()
 
     def magphase(self, D, power=1):
         mag = np.abs(D)
@@ -491,35 +497,26 @@ class Transform(object):
 
 
 if __name__ == "__main__":
+
+    from DistantSpeech.beamformer.utils import load_audio as audioread
+    from DistantSpeech.beamformer.utils import save_audio as audiowrite
+    from tqdm import tqdm
+
     filename = "DistantSpeech/transform/speech1.wav"
-    data, sr = librosa.load(filename, sr=None)
+    x, sr = librosa.load(filename, sr=None)
+    print(x.shape)
+    x_ch2 = np.vstack((x, x)).T
+    print(x_ch2.shape)
 
-    data_recon = np.zeros(len(data))
-    t = 0
-    frame_length = 1120
-    stream = librosa.stream(
-        filename,
-        block_length=1,
-        frame_length=frame_length,
-        hop_length=frame_length,
-        mono=True,
-    )
-    transform = Transform(n_fft=320, hop_length=160)
-    for y_block in stream:
-        if len(y_block) >= 1024:
-            D = transform.stft(y_block)  # [half_bin, n_frame]
-            d = transform.istft(D)
-            data_recon[t * frame_length : (t + 1) * frame_length] = d
-        t = t + 1
+    n_fft = 256
+    hop_length = 128
+    transform = Transform(n_fft=n_fft, hop_length=hop_length, channel=2)
 
-    # compare difference between original signal and reconstruction signal
-    plt.figure()
-    plt.plot(data[: len(data_recon[160:])] - data_recon[160:])
-    plt.title("difference between source and reconstructed signal")
-    plt.xlabel("samples")
-    plt.ylabel("amplitude")
-    plt.show()
+    data_recon = np.zeros(x_ch2.shape)
 
-    # if you want to listen the reconstructed signal, uncomment section below
-    # sd.play(data_recon, sr)
-    # sd.wait()
+    for n in tqdm(range(len(x) - hop_length)):
+        if np.mod(n, hop_length) == 0:
+            input_vector = x_ch2[n : n + hop_length, :]
+            X = transform.analysis(input_vector)
+            x_rec = transform.synthesis(X)
+            data_recon[n : n + hop_length] = x_rec
