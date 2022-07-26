@@ -27,13 +27,31 @@ import numpy as np
 import math
 
 
-def getweghts_coherent(Fvv_est: np.ndarray, Fvv_diffuse: np.ndarray, k, method=3):
+def getweghts_coherent(Fvv_est: np.ndarray, Fvv_diffuse: np.ndarray, k, method=3, r=0.032):
 
     c = 340
     fs = 16000
     nfft = 256
-    r = 0.032 * 2
     GAIN_FLOOR = 0.1
+    eps = 1e-6
+    SNR = 0
+
+    Fvv_UPPER = 0.998
+    GAIN_FLOOR = 0.02
+    Fy_real = np.real(Fvv_est)
+    Fy_imag = np.imag(Fvv_est)
+    Fn = Fvv_diffuse
+
+    if Fy_real > Fvv_UPPER:
+        Fy_real = Fvv_UPPER
+    abs_Fvv_est = np.sqrt(Fy_real**2 + Fy_imag**2)
+    if abs_Fvv_est > Fvv_UPPER:
+        abs_Fvv_est = Fvv_UPPER
+    if Fn > Fvv_UPPER:
+        Fn = Fvv_UPPER
+
+    DDR = (np.abs(Fn) ** 2 - abs_Fvv_est**2) / (abs_Fvv_est**2 - 1)  # eq.10
+    K = DDR / (DDR + 1)
 
     if method == 0:
         G = 1  # don't change anything
@@ -65,22 +83,6 @@ def getweghts_coherent(Fvv_est: np.ndarray, Fvv_diffuse: np.ndarray, k, method=3
         G = (1 - (np.real(Fvv_est)) ** 2 - np.imag(Fvv_est) ** 2) / (2 * (1 - np.real(Fvv_est)))
     if method == 3:
         # refer to [3]
-        Fvv_UPPER = 0.98
-        GAIN_FLOOR = 0.2
-        Fy_real = np.real(Fvv_est)
-        Fy_imag = np.imag(Fvv_est)
-        Fn = Fvv_diffuse
-
-        if Fy_real > Fvv_UPPER:
-            Fy_real = Fvv_UPPER
-        abs_Fvv_est = np.sqrt(Fy_real**2 + Fy_imag**2)
-        if abs_Fvv_est > Fvv_UPPER:
-            abs_Fvv_est = Fvv_UPPER
-        if Fn > Fvv_UPPER:
-            Fn = Fvv_UPPER
-
-        DDR = (np.abs(Fn) ** 2 - abs_Fvv_est**2) / (abs_Fvv_est**2 - 1)  # eq.10
-        K = DDR / (DDR + 1)
         theta_s = 90 * np.pi / 180  # target, endfire
         theta_i = 0 * np.pi / 180  # interference, broadside
         constant = 2 * np.pi * k * fs * r / ((nfft * c))
@@ -92,27 +94,11 @@ def getweghts_coherent(Fvv_est: np.ndarray, Fvv_diffuse: np.ndarray, k, method=3
         C = (Fy_real - Fn * (1 - K)) * sin_alpha - Fy_imag * cos_alpha
 
         T = K - cos_alpha * (Fy_real - Fn * (1 - K)) - Fy_imag * sin_alpha
-        sin_beta = (-1 * B * C - A * T) / (A**2 + B**2)  # eq.21
-        G = (Fy_imag - sin_beta * K) / (sin_alpha - sin_beta)  # eq.12
+        sin_beta = (-1 * B * C - A * T) / (A**2 + B**2 + 1e-6)  # eq.21
+        G = (Fy_imag - sin_beta * K) / (sin_alpha - sin_beta + 1e-6)  # eq.12
 
     if method == 4:
         # refer to [3]
-        Fvv_UPPER = 0.98
-        GAIN_FLOOR = 0.2
-        Fy_real = np.real(Fvv_est)
-        Fy_imag = np.imag(Fvv_est)
-        Fn = Fvv_diffuse
-
-        if Fy_real > Fvv_UPPER:
-            Fy_real = Fvv_UPPER
-        abs_Fvv_est = np.sqrt(Fy_real**2 + Fy_imag**2)
-        if abs_Fvv_est > Fvv_UPPER:
-            abs_Fvv_est = Fvv_UPPER
-        if Fn > Fvv_UPPER:
-            Fn = Fvv_UPPER
-
-        DDR = (np.abs(Fn) ** 2 - abs_Fvv_est**2) / (abs_Fvv_est**2 - 1)  # eq.10
-        K = DDR / (DDR + 1)
         theta_s = 90 * np.pi / 180  # target, endfire
         theta_i = 0 * np.pi / 180  # interference, broadside
         constant = 2 * np.pi * k * fs * r / ((nfft * c))
@@ -124,22 +110,20 @@ def getweghts_coherent(Fvv_est: np.ndarray, Fvv_diffuse: np.ndarray, k, method=3
         C = (Fy_real - Fn * (1 - K)) * sin_alpha - Fy_imag * cos_alpha
 
         T = K - cos_alpha * (Fy_real - Fn * (1 - K)) - Fy_imag * sin_alpha
-        sin_beta = (-1 * B * C - A * T) / (A**2 + B**2)  # eq.21
-        cos_beta = (A * C - B * T) / (A**2 + B**2)  # eq.22
+        sin_beta = (-1 * B * C - A * T) / (A**2 + B**2 + 1e-6)  # eq.21
+        cos_beta = (A * C - B * T) / (A**2 + B**2 + 1e-6)  # eq.22
 
         A_ = cos_alpha - cos_beta
         B_ = cos_beta + Fn * (1 - K)  # eq.16
         C_ = sin_alpha - sin_beta
         D_ = sin_beta * K
 
-        if np.abs(Fy_imag - sin_alpha) < np.abs(Fy_imag - sin_beta):  # eq.18
-            gamma_ = 1
-        else:
-            gamma_ = -1
+        gamma_ = 1 if np.abs(Fy_imag - sin_alpha) < np.abs(Fy_imag - sin_beta) else -1  # eq.18
 
         T_ = (abs_Fvv_est**2) * (A_**2 + C_**2) - (A_ * D_ - B_ * C_) ** 2
+        T_ = np.maximum(T_, 1e-6)
 
-        G = -1 * (A_ * B_ + C_ * D_) + gamma_ * np.sqrt(T_) / (A_**2 + C_**2)  # eq.17
+        G = -1 * (A_ * B_ + C_ * D_) + gamma_ * np.sqrt(T_) / (A_**2 + C_**2 + 1e-6)  # eq.17
 
     if method == 5:
         # refer to [4]
@@ -150,7 +134,7 @@ def getweghts_coherent(Fvv_est: np.ndarray, Fvv_diffuse: np.ndarray, k, method=3
 
         theta = 90 * np.pi / 180  # interference broadside
         ata = 0 * np.pi / 180  # target endfire
-        omega = 2 * np.pi * (k - 1) / nfft
+        omega = 2 * np.pi * k / nfft
         tao = fs * d / c
         omega_ = omega * tao
         beta = omega_ * np.cos(ata)
@@ -162,8 +146,9 @@ def getweghts_coherent(Fvv_est: np.ndarray, Fvv_diffuse: np.ndarray, k, method=3
         C = Fy_real * np.sin(omega_) - Fy_imag * np.cos(omega_)
         T = 1 - Fy_real * np.cos(omega_) - Fy_imag * np.sin(omega_)
 
-        sin_alpha = (-1 * B * C + A * T) / (A**2 + B**2)  # eq.14
-        SNR = (sin_alpha - Fy_imag) / (Fy_imag - np.sin(beta))  # eq.10
+        sin_alpha = (-1 * B * C + A * T) / (A**2 + B**2 + eps)  # eq.14
+        SNR = (sin_alpha - Fy_imag) / (Fy_imag - np.sin(beta) + eps)  # eq.10
+        SNR = np.maximum(SNR, eps)
         G = np.sqrt(SNR / (SNR + 1))
 
     if G < GAIN_FLOOR:
@@ -173,4 +158,4 @@ def getweghts_coherent(Fvv_est: np.ndarray, Fvv_diffuse: np.ndarray, k, method=3
     if math.isnan(G):
         G = GAIN_FLOOR
 
-    return G
+    return G, SNR
