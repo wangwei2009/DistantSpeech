@@ -35,9 +35,43 @@ def update_matrix(X, Xm, axis=0):
     return X
 
 
+def mdf_adjust_prop(W, M):
+    """proportionate multidelay filtering
+    adapted from speex
+
+    Args:
+        W (np.array): filter weights, [half_bin, num_block]
+        M (int): number of block
+
+    Returns:
+        np.array: proportion coeffs, [num_block, 1]
+    """
+    assert M == W.shape[1]
+    # 记录分块能量和
+    prop = np.zeros((M, 1))
+    for i in range(M):
+        tmp = 0
+        tmp = tmp + np.sum(np.abs(W[:, i]) ** 2)
+        prop[i] = np.sqrt(tmp)
+    max_sum = np.maximum(prop, 1e-6)  # 限制最小值大于0
+    prop = prop + 0.1 * max_sum  # 1.1 scale
+    prop_sum = 1e-6 + sum(prop)  # 总能量
+    prop = 0.99 * prop / prop_sum  # 比例
+
+    return prop
+
+
 class Mdf(BaseFilter):
     def __init__(
-        self, filter_len=1024, mu=0.01, num_block=1, constrain=True, n_channels=1, alpha=0.8, non_causal=False
+        self,
+        filter_len=1024,
+        mu=0.01,
+        num_block=1,
+        constrain=True,
+        n_channels=1,
+        alpha=0.8,
+        prop=False,
+        non_causal=False,
     ):
         BaseFilter.__init__(self, filter_len=filter_len, mu=mu)
         self.n_channels = n_channels
@@ -60,6 +94,8 @@ class Mdf(BaseFilter):
         self.alpha = alpha
 
         self.constrain = constrain
+
+        self.prop = prop
 
         self.non_causal = non_causal
         if non_causal:
@@ -123,7 +159,9 @@ class Mdf(BaseFilter):
         Pm = np.sum(np.real((Xm.conj() * Xm)), axis=1, keepdims=True)  # eq.12
         self.Pm = update_matrix(self.Pm, Pm)  # eq.13
 
-        self.P = self.alpha * self.P + (1 - self.alpha) * np.sum(self.Pm, axis=1, keepdims=True)  # eq.11
+        self.P = self.alpha * self.P + (1 - self.alpha) * np.sum(
+            self.Pm, axis=1, keepdims=True
+        )  # eq.11
 
         # save only the last half frame to avoid circular convolution effects
         y = ifft(np.sum(self.X * self.W, axis=1, keepdims=True), axis=0)[-self.block_len :, :]
@@ -149,7 +187,14 @@ class Mdf(BaseFilter):
             grad = fft(grad_1, n=self.n_fft, axis=0)
 
         if update:
-            self.W = self.W + p * 2 * self.mu * grad  # update filter weights
+            if self.prop:
+                prop_coeffs = mdf_adjust_prop(self.W, self.num_block)
+                for n in range(self.num_block):
+                    self.W[:, n] = (
+                        self.W[:, n] + prop_coeffs[n, 0] * p * self.mu * grad[:, n]
+                    )  # update filter weights
+            else:
+                self.W = self.W + p * 2 * self.mu * grad  # update filter weights
 
         w_est = ifft(self.W, n=self.n_fft, axis=0)
         self.w = w_est[: self.block_len, :]
@@ -167,8 +212,12 @@ class Mdf(BaseFilter):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Neural Feature Extractor")
-    parser.add_argument("-l", "--listen", action='store_true', help="set to listen output")  # if set true
-    parser.add_argument("-s", "--save", action='store_true', help="set to save output")  # if set true
+    parser.add_argument(
+        "-l", "--listen", action="store_true", help="set to listen output"
+    )  # if set true
+    parser.add_argument(
+        "-s", "--save", action="store_true", help="set to save output"
+    )  # if set true
 
     args = parser.parse_args()
     # main(args)
