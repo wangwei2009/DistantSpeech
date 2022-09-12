@@ -26,6 +26,7 @@ from tqdm import tqdm
 from DistantSpeech.adaptivefilter import BaseFilter, awgn, Mdf
 from DistantSpeech.beamformer.utils import load_audio, DelaySamples
 from DistantSpeech.adaptivefilter.mdf import mdf_adjust_prop
+from DistantSpeech.adaptivefilter.feature import Emphasis, FilterDcNotch16
 
 
 # def circshift(X, axis=0, Xm=None):
@@ -77,10 +78,16 @@ class Aec(BaseFilter):
 
         self.E_pre = np.zeros((self.half_bin, n_channels), dtype=complex)
         self.Pe = np.zeros((self.half_bin, n_channels))
-        self.Ryy = np.zeros((self.half_bin, n_channels))
-        self.Rey = np.zeros((self.half_bin, n_channels))
+        self.Ryy = 1.0
+        self.Rey = 1.0
+
+        self.emphsis_spk = Emphasis()
+        self.emphsis_mic = Emphasis()
+        self.dc_notch_spk = FilterDcNotch16()
+        self.dc_notch_mic = FilterDcNotch16()
 
         self.mu_opt = np.zeros((self.half_bin, n_channels))
+        self.mu_max = 0.1
 
         self.D = 3
         self.grad_buffer = np.zeros((self.half_bin, self.D), dtype=complex)
@@ -99,6 +106,7 @@ class Aec(BaseFilter):
         self.window = 0.5 - 0.5 * np.cos(
             2 * np.pi * (np.linspace(0, self.n_fft - 1, num=self.n_fft)) / self.n_fft
         )
+        self.window = self.window[:, np.newaxis]
 
         self.gamma = 0.8
         self.beta = 1.0
@@ -159,10 +167,58 @@ class Aec(BaseFilter):
         self.Ryy = (1 - alpha2) * self.Ryy + alpha2 * self.Py
 
     def transfer_logic(self, e_f, e_b, y_f, y_b):
-        # transfer logic
-        if 10 * np.log10(np.sum(np.abs(e_f)) / (np.sum(np.abs(e_b)) + 1e-6)) > 3:
+        # # transfer logic
+        VAR1_UPDATE = 0.5
+        VAR2_UPDATE = 0.25
+        VAR_BACKTRACK = 4
+        MIN_LEAK = 0.005
+        Sff = np.sum(np.abs(e_f) ** 2)
+        See = np.sum(np.abs(e_b) ** 2)
+        Dbf = np.sum(np.abs(y_f - y_b) ** 2)
+        self.Davg1 = 0.6 * self.Davg1 + 0.4 * (Sff - See)
+        self.Davg2 = 0.85 * self.Davg2 + 0.15 * (Sff - See)
+        self.Dvar1 = 0.36 * self.Dvar1 + 0.16 * Sff * Dbf
+        self.Dvar2 = 0.7225 * self.Dvar2 + 0.0225 * Sff * Dbf
+
+        update_foreground = 0
+        reset_background = 0
+
+        # % Check if we have a statistically significant reduction in the residual echo */
+        # % Note that this is *not* Gaussian, so we need to be careful about the longer tail */
+        if (Sff - See) * np.abs(Sff - See) > (Sff * Dbf):
+            update_foreground = 1
+        elif self.Davg1 * abs(self.Davg1) > (VAR1_UPDATE * self.Dvar1):
+            update_foreground = 1
+        elif self.Davg2 * abs(self.Davg2) > (VAR2_UPDATE * (self.Dvar2)):
+            update_foreground = 1
+
+        if update_foreground:
+            # print("..........update foreground...........\n")
+            self.Davg1 = 0
+            self.Davg2 = 0
+            self.Dvar1 = 0
+            self.Dvar2 = 0
             self.foreground[:] = self.W
-            y_f = y_b.copy()
+            # % Apply a smooth transition so as to not introduce blocking artifacts */
+            y_f = self.window[self.block_len :] * y_f + self.window[: self.block_len] * y_b
+
+        if reset_background:
+            # % Copy foreground filter to background filter */
+            self.W[:] = self.foreground
+            # % We also need to copy the output so as to get correct adaptation */
+            e_b = e_f
+            y_b = y_f
+
+            See = Sff
+            self.Davg1 = 0
+            self.Davg2 = 0
+            self.Dvar1 = 0
+            self.Dvar2 = 0
+        # if 10 * np.log10(np.sum(np.abs(e_f)) / (np.sum(np.abs(e_b)) + 1e-6)) > 3:
+        #     self.foreground[:] = self.W
+        #     # y_f = y_b.copy()
+        #     # % Apply a smooth transition so as to not introduce blocking artifacts */
+        #     y_f = self.window[self.block_len :] * y_f + self.window[: self.block_len] * y_b
 
         return e_f, e_b, y_f, y_b
 
@@ -172,9 +228,9 @@ class Aec(BaseFilter):
         Parameters
         ----------
         x_n_vec : np.array, (n_samples,) or (n_samples, n_chs)
-            input signal
+            far-end(spk) ref signal
         d_n_vec : np.array,  (n_samples,) or (n_samples, 1)
-            expected signal
+            near-end(mic) expected signal
         update : bool, optional
             control whether update filter coeffs, by default True
         p : float, optional
@@ -189,6 +245,13 @@ class Aec(BaseFilter):
         w : np.array,  (filter_len, 1)
             estimated filter coeffs
         """
+
+        # d_n_vec, self.dc_notch_mic.mem = self.dc_notch_mic.filter_dc_notch16(d_n_vec)
+        # x_n_vec, self.dc_notch_spk.mem = self.dc_notch_spk.filter_dc_notch16(x_n_vec)
+
+        d_n_vec = self.emphsis_mic.pre_emphsis(d_n_vec)
+        x_n_vec = self.emphsis_spk.pre_emphsis(x_n_vec)
+
         self.update_input(x_n_vec)
 
         Sxx = np.sum(x_n_vec**2)  # echo energy
@@ -243,29 +306,44 @@ class Aec(BaseFilter):
         Syy = np.sum(y_b)  # % 估计回声能量和
         Sdd = np.sum(d_n_vec**2)  # % 近端信号能量和
 
+        Yf = np.abs(Y * Y.conj())
+        Rf = np.abs(E * E.conj())
+
         gamma = 0.8
         gamma_1 = 1 - gamma
-        self.Py = gamma_1 * self.Py + gamma * (np.abs(Y) ** 2 - np.abs(self.Y_pre) ** 2)  # eq.17
+        self.Py = gamma_1 * self.Py + gamma * Yf  # eq.17
         self.Y_pre[:] = Y
 
-        self.Pe = gamma_1 * self.Pe + gamma * (np.abs(E) ** 2 - np.abs(self.E_pre) ** 2)  # eq.18
+        self.Pe = gamma_1 * self.Pe + gamma * Rf  # eq.18
         self.E_pre[:] = E
 
         Syy = np.sum(y_b**2)
         See = np.sum(e_b**2)
 
+        Eh_cur = Rf - self.Pe  # 误差功率谱 瞬时值 - 平滑值
+        Yh_cur = Yf - self.Py
+        Pey_cur = np.sum(Eh_cur * Yh_cur)
+        Pyy_cur = np.sum(Yh_cur**2)
+        Pyy = np.sqrt(Pyy_cur)
+        Pey = Pey_cur / (Pyy + 1e-6)
+
         alpha = Syy / See
         alpha = self.beta0 * np.minimum(alpha, 1.0)  # eq.22
         alpha_1 = 1 - alpha  # eq.22
 
-        self.Ryy = alpha_1 * self.Ryy + alpha * self.Py * self.Py  # eq.20
-        self.Rey = alpha_1 * self.Rey + alpha * self.Py * self.Pe  # eq.21
+        self.Ryy = alpha_1 * self.Ryy + alpha * Pyy  # eq.20
+        self.Rey = alpha_1 * self.Rey + alpha * Pey  # eq.21
 
         # % leak_estimate is the linear regression result */
-        self.leak_estimate = np.sum(self.Rey) / (np.sum(self.Ryy) + 1e-6)  # eq. 19
+        self.leak_estimate = self.Rey / (self.Ryy + 1e-6)  # eq. 19
 
-        self.mu_opt = self.leak_estimate * np.abs(Y) ** 2 / (np.abs(E) ** 2 + 1e-3)  # eq.16
-        self.mu_opt = np.maximum(np.minimum(self.mu_opt, 0.1), 1e-3)
+        # self.mu_opt = self.leak_estimate * np.abs(Y) ** 2 / (self.power * np.abs(E) ** 2 + 1e-3)
+        self.mu_opt = self.leak_estimate * np.abs(Y) ** 2 / (np.abs(E) ** 2 + 1e-3)
+        self.mu_opt[:2, 0] = self.mu_opt[:2, 0] * 2
+        self.mu_opt = np.maximum(np.minimum(self.mu_opt, self.mu_max), 1e-3)
+        mu_opt_win = np.array([0.25, 0.5, 0.25])
+        self.mu_opt[:, 0] = np.convolve(self.mu_opt[:, 0], mu_opt_win, mode="same")
+        # self.mu_opt[:2, 0] = 0.1
 
         if self.cnt < 5:
             self.cnt = self.cnt + 1
@@ -300,6 +378,8 @@ class Aec(BaseFilter):
             w_shift[:fir_truncate] = 0.0
             w_shift[-fir_truncate:] = 0.0
             self.W = np.fft.rfft(w_shift, n=self.n_fft, axis=0)
+
+        out = self.emphsis_mic.de_emphsis(out)
 
         return out, self.w
 
