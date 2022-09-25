@@ -13,7 +13,6 @@ Multi-Channel Speech Presence Probability
 """
 
 import os
-from tkinter.messagebox import NO
 
 import numpy as np
 from scipy.signal import convolve
