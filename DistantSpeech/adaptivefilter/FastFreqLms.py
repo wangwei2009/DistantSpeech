@@ -45,7 +45,7 @@ class DelayObj(object):
 
 
 class FastFreqLms(BaseFilter):
-    def __init__(self, filter_len=128, mu=0.01, constrain=True, n_channels=1, alpha=0.9, non_causal=False):
+    def __init__(self, filter_len=128, mu=0.01, constrain=True, n_channels=1, alpha=0.9, non_causal=False, two_path=False):
         BaseFilter.__init__(self, filter_len=filter_len, mu=mu)
         self.n_channels = n_channels
         self.input_buffer = np.zeros((filter_len * 2, n_channels))  # to store [old, new]
@@ -64,6 +64,24 @@ class FastFreqLms(BaseFilter):
         self.non_causal = non_causal
         if non_causal:
             self.delay_samples = DelaySamples(self.filter_len, int(self.filter_len / 2))
+
+        self.two_path = two_path
+        if self.two_path:
+            self.foreground = np.fft.rfft(self.w_pad, axis=0)
+            self.window = 0.5 - 0.5 * np.cos(
+                2 * np.pi * (np.linspace(0, self.n_fft - 1, num=self.n_fft)) / self.n_fft
+            )
+            self.window = self.window[:, np.newaxis]
+
+    def transfer_logic(self, e_f, e_b, y_f, y_b):
+        # # transfer logic
+        if 10 * np.log10(np.sum(np.abs(e_f)) / (np.sum(np.abs(e_b)) + 1e-6)) > 3:
+            self.foreground[:] = self.W
+            # y_f = y_b.copy()
+            # % Apply a smooth transition so as to not introduce blocking artifacts */
+            y_f = self.window[self.block_len :] * y_f + self.window[: self.block_len] * y_b
+
+        return e_f, e_b, y_f, y_b
 
     def set_weights(self, weights):
         weights = np.squeeze(weights)
@@ -119,6 +137,10 @@ class FastFreqLms(BaseFilter):
         # summation of multichannel signal
         y = np.sum(y, axis=1, keepdims=True)
 
+        if self.two_path:
+            y_f = np.fft.irfft(X * self.foreground, axis=0)[-self.filter_len :, :]
+            y_f = np.sum(y_f, axis=1, keepdims=True)
+
         # use causal filter to estimate non-causal system will introduce a delay(filter_len/2) compare to expected signal
         if self.non_causal:
             d_n_vec = self.delay_samples.delay(d_n_vec)
@@ -126,6 +148,11 @@ class FastFreqLms(BaseFilter):
         if d_n_vec.ndim == 1:
             d_n_vec = d_n_vec[:, np.newaxis]
         e = d_n_vec - y
+
+        if self.two_path:
+            e_f = d_n_vec - y_f
+            e_f, e_b, y, y_b = self.transfer_logic(e_f, e, y_f, y)
+            e = d_n_vec - y
 
         e_pad = np.concatenate((np.zeros((self.filter_len, 1)), e), axis=0)
 
