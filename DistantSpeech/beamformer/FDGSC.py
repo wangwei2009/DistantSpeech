@@ -90,14 +90,11 @@ class FDGSC(beamformer):
         frameLen=256,
         hop=None,
         nfft=None,
-        channels=4,
-        c=343,
-        r=0.032,
         fs=16000,
         angle=[197, 0],
     ):
 
-        beamformer.__init__(self, mic_array, frame_len=frameLen, hop=hop, nfft=nfft, c=c, fs=fs)
+        beamformer.__init__(self, mic_array, frame_len=frameLen, hop=hop, nfft=nfft, fs=fs)
         self.angle = np.array(angle) / 180 * np.pi if isinstance(angle, list) else angle
 
         # construct fraction delay filter for time-alignment in fixed beamformer
@@ -243,7 +240,6 @@ def main(args):
     hop = frameLen / 2
     overlap = frameLen - hop
     nfft = 256
-    c = 340
     r = 0.032
     fs = 16000
 
@@ -258,7 +254,7 @@ def main(args):
 
     start = time()
 
-    fdgsc = FDGSC(MicArrayObj, frameLen, hop, nfft, c, fs)
+    fdgsc = FDGSC(MicArrayObj, frameLen, hop, nfft, fs)
 
     yout = fdgsc.process(x)
 
