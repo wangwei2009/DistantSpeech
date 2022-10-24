@@ -40,9 +40,14 @@ class TDGSC(beamformer):
             self.dc_notch_mic.append(FilterDcNotch16(radius=0.98))
 
         self.mcra = NoiseEstimationMCRA(nfft=frameLen * 2)
+        self.mcra.L = 65
         self.transform = Transform(n_fft=frameLen * 2, hop_length=frameLen, channel=1)
 
         self.spp = self.mcra
+
+        self.omlsa_multi = NsOmlsaMulti(nfft=frameLen * 2, cal_weights=True, M=self.M)
+        self.transform_fbf = Transform(n_fft=frameLen * 2, hop_length=frameLen, channel=1)
+        self.transform_bm = Transform(n_fft=frameLen * 2, hop_length=frameLen, channel=self.M - 1)
 
     def fixed_beamformer(self, x):
         """fixed beamformer
@@ -100,7 +105,7 @@ class TDGSC(beamformer):
 
         return output_n
 
-    def process(self, x):
+    def process(self, x, postfilter=False):
         """time domain GSC beamformer processing function
 
         Parameters
@@ -127,11 +132,15 @@ class TDGSC(beamformer):
         frameNum = int((samples) / self.frameLen)
 
         p = np.zeros((self.spp.half_bin, frameNum))
+        G = np.zeros((self.spp.half_bin, frameNum))
+
+        t = 0
 
         for n in range(frameNum):
             x_n = x[n * self.frameLen : (n + 1) * self.frameLen, :]
 
-            p[:, n] = self.spp.estimation(D[:, n, :])
+            G[:, t] = self.spp.estimation(D[:, t, :])
+            p[:, t] = self.spp.p
 
             x_aligned = self.time_alignment.process(x_n)
 
@@ -140,19 +149,34 @@ class TDGSC(beamformer):
             bm_output = self.blocking_matrix(x_aligned)
 
             # AIC block
-            output_n, _ = self.aic_filter.update(bm_output, fixed_output, fir_truncate=30)
+            output_n, _ = self.aic_filter.update(bm_output, fixed_output, fir_truncate=30, p=1 - p[:, t : t + 1])
+
+            if postfilter:
+                Y = self.transform_fbf.stft(output_n)
+                U = self.transform_bm.stft(bm_output)
+
+                self.omlsa_multi.estimation(
+                    np.real(Y[:, 0, 0] * np.conj(Y[:, 0, 0])), np.real(U[:, 0, :] * np.conj(U[:, 0, :]))
+                )
+
+                # post-filter
+                G[:, t] = np.sqrt(self.omlsa_multi.G)
+                t += 1
+                Y[:, 0, 0] = Y[:, 0, 0] * np.sqrt(self.omlsa_multi.G)
+                output_n = self.transform_fbf.istft(Y)
 
             # output[n * self.frameLen : (n + 1) * self.frameLen] = fixed_output[:, 0]
             # output[n * self.frameLen : (n + 1) * self.frameLen] = np.squeeze(bm_output[:, 0])
             output[n * self.frameLen : (n + 1) * self.frameLen] = np.squeeze(output_n)
 
-        return output
+        return output, p
 
 
 if __name__ == "__main__":
 
     M = 4
+    frameLen = 512
     mic_array = MicArray(arrayType="circular", r=0.032, M=M)
-    gsc_beamformer = TDGSC(mic_array)
+    gsc_beamformer = TDGSC(mic_array, frameLen=frameLen)
     x = np.random.randn(16000 * 5, 4)
     output = gsc_beamformer.process(x)
