@@ -100,12 +100,12 @@ class NsOmlsaMulti(NoiseEstimationBase):
                 self.zeta_U[ch, :] = self.smooth_psd(u[:, ch], self.zeta_U[ch, :], self.win, self.alpha_s)
 
             self.LAMBDA_Y = self.zeta_Y / (self.MU_Y + 1e-6)
-            self.LAMBDA_U = np.max(self.zeta_U / self.MU_U, axis=0)
+            self.LAMBDA_U = np.max(self.zeta_U / (self.MU_U + 1e-6), axis=0)
 
             # Eq.6 The transient beam - to - reference ratio(TBRR)
             eps = 0.01
-            self.Omega = np.maximum((self.zeta_Y - self.MU_Y), 0) / np.maximum(
-                np.max(self.zeta_U - self.MU_U, axis=0), eps * self.MU_Y
+            self.Omega = np.maximum((self.zeta_Y - self.MU_Y), 1e-6) / (
+                np.maximum(np.max(self.zeta_U - self.MU_U, axis=0), eps * self.MU_Y) + 1e-6
             )
             self.Omega = np.maximum(self.Omega, 0.1)
             self.Omega = np.minimum(self.Omega, 100)
