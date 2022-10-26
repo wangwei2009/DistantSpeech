@@ -63,7 +63,9 @@ class TDGSC(beamformer):
             output data, [samples, 1]
         """
 
-        return np.mean(x, axis=1, keepdims=True)
+        x_aligned = self.time_alignment.process(x)
+
+        return np.mean(x_aligned, axis=1, keepdims=True), x_aligned
 
     def blocking_matrix(self, x):
         """fixed blocking matrix
@@ -85,7 +87,7 @@ class TDGSC(beamformer):
 
         return bm_output
 
-    def aic(self, y_fbf, bm_output):
+    def aic(self, y_fbf, bm_output, p=1.0):
         """adaptive interference cancellation block
 
         Parameters
@@ -101,7 +103,7 @@ class TDGSC(beamformer):
             _description_
         """
         # AIC block
-        output_n, _ = self.aic_filter.update(bm_output, y_fbf, fir_truncate=30)
+        output_n, _ = self.aic_filter.update(bm_output, y_fbf, fir_truncate=30, p=p)
 
         return output_n
 
@@ -142,14 +144,12 @@ class TDGSC(beamformer):
             G[:, t] = self.spp.estimation(D[:, t, :])
             p[:, t] = self.spp.p
 
-            x_aligned = self.time_alignment.process(x_n)
-
-            fixed_output = self.fixed_beamformer(x_aligned)
+            fixed_output, x_aligned = self.fixed_beamformer(x_n)
 
             bm_output = self.blocking_matrix(x_aligned)
 
             # AIC block
-            output_n, _ = self.aic_filter.update(bm_output, fixed_output, fir_truncate=30, p=1 - p[:, t : t + 1])
+            output_n = self.aic(fixed_output, bm_output, p=1 - p[:, t : t + 1])
 
             if postfilter:
                 Y = self.transform_fbf.stft(output_n)
