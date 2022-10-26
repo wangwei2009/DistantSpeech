@@ -13,7 +13,8 @@ def fractional_delay_filter_bank(delays):
     Returns
     -------
     numpy array
-        An ndarray where the ith row contains the fractional delay filter
+        [filter_len, chs]
+        An ndarray where the ith col contains the fractional delay filter
         corresponding to the ith delay. The number of columns of the matrix
         is proportional to the maximum delay.
     """
@@ -47,7 +48,7 @@ def fractional_delay_filter_bank(delays):
     # compute all sinc with one call
     bank_flat[indices.ravel()] = windows * np.sinc(sinc_times.ravel())
 
-    return np.reshape(bank_flat, (N, -1))
+    return np.reshape(bank_flat, (N, -1)).T
 
 
 def frac_delay(delta, N, w_max=0.9, C=4):
