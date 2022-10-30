@@ -7,6 +7,91 @@ from DistantSpeech.beamformer.gen_noise_msc import gen_noise_msc
 from DistantSpeech.beamformer.beamformer import compute_mvdr_weight
 import warnings
 
+from DistantSpeech.transform.multirate import fractional_delay_filter_bank
+
+
+def fir_filter(x, fir_coeffs, fir_cache):
+    """_summary_
+
+    Parameters
+    ----------
+    x : np.array
+        input multichannel data, [samples, chs]
+    filter_coeffs : np.array
+        fir filter coeffs, [fir_filter_len, chs]
+    fir_cache : np.array
+        fir filter cache, [fir_filter_len-1, chs]
+
+    Returns
+    -------
+    output : np.array
+        fir filterd date, [samples, chs]
+    fir_cache : np.array
+        fir filter cache, [fir_filter_len-1, chs]
+    """
+
+    input_len, M = x.shape
+    fir_filter_len = fir_coeffs.shape[0]
+
+    fir_input = np.zeros((fir_filter_len - 1 + input_len, M))
+    fir_input[: fir_filter_len - 1, :] = fir_cache[:]
+    fir_input[fir_filter_len - 1 :, :] = x
+
+    output = np.zeros(x.shape)
+
+    fir_coeffs = np.flipud(fir_coeffs)
+
+    for m in range(M):
+        for n in range(input_len):
+            output[n, m] = fir_coeffs[:, m : m + 1].T @ fir_input[n : n + fir_filter_len, m : m + 1]
+
+    return output, x[-fir_filter_len + 1 :, :]
+
+
+class TimeAlignment(beamformer):
+    def __init__(
+        self,
+        mic_array: MicArray,
+        angle=[197, 0],
+        frame_len=256,
+        hop=None,
+        nfft=None,
+        r=0.032,
+        fs=16000,
+    ):
+        super().__init__(mic_array, frame_len, hop, nfft, r, fs)
+
+        self.angle = np.array(angle) / 180 * np.pi if isinstance(angle, list) else angle
+
+        # construct fraction delay filter for time-alignment in fixed beamformer
+        self.tau = mic_array.compute_tau(self.angle)
+        print('tau:{}'.format(self.tau))
+        self.tau = -(self.tau - np.max(self.tau))
+        delay_samples = np.array(self.tau)[:, 0] * mic_array.fs
+        print('delay_samples:{}'.format(delay_samples))
+        self.delay_filter = fractional_delay_filter_bank(delay_samples)
+        self.delay_filter_len = self.delay_filter.shape[0]
+        print('self.delay_filter:{}'.format(self.delay_filter.shape))
+        self.fir_cache = np.zeros((self.delay_filter_len - 1, self.M))
+
+    def process(self, x):
+        """fixed beamformer
+
+        Parameters
+        ----------
+        x : np.array
+            input multichannel data, [samples, chs]
+
+        Returns
+        -------
+        np.array
+            output data, [samples, chs]
+        """
+
+        output, self.fir_cache = fir_filter(x, self.delay_filter, self.fir_cache)
+
+        return output
+
 
 class FixedBeamformer(beamformer):
     def __init__(self, MicArray, frameLen=256, hop=None, nfft=None, c=343, fs=16000, r=0.032):
