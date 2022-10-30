@@ -40,9 +40,8 @@ class SubbandLmsMc(SubbandAF):
         self.input_buffer = np.zeros((self.half_band, filter_len, self.M), dtype=complex)
 
         self.W = np.zeros((self.half_band, filter_len, channel), dtype=complex)
+        self.mu = np.ones((self.half_band, 1, self.M)) * mu
 
-        print(self.hop_length)
-        print(num_bands)
         self.transform_x = Transform(n_fft=num_bands, hop_length=self.hop_length, channel=channel)
         self.transform_d = Transform(n_fft=num_bands, hop_length=self.hop_length)
 
@@ -56,8 +55,8 @@ class SubbandLmsMc(SubbandAF):
 
         Returns
         -------
-        _type_
-            _description_
+        self.input_buffer : np.array
+            buffered data, [half_band, filter_len, channel]
         """
         # update input buffer
         self.input_buffer[:, 1:, :] = self.input_buffer[:, :-1, :]
@@ -87,7 +86,6 @@ class SubbandLmsMc(SubbandAF):
         if 'float' in str(x_n.dtype) and 'float' in str(d_n.dtype):
             # x_n = self.transform_x.analysis(x_n)
             # d_n = self.transform_d.analysis(d_n)
-            print(x_n.shape)
             x_n = self.transform_x.analysis(x_n)  # [half_band, 1, C]
 
             d_n = np.squeeze(self.transform_d.analysis(d_n))  # [half_band, ]
@@ -117,6 +115,31 @@ class SubbandLmsMc(SubbandAF):
         filter_output = np.einsum('ijk,ijk->i', W.conj(), X)
 
         return filter_output
+
+    def update_coef(self, grad, p=None):
+        """update filter weights
+
+        Parameters
+        ----------
+        grad : complex np.array
+            filter gradient, [half_bands, filter_len, channel]
+        p : np.array, optional
+            update probability, [half_bands, 1], by default None
+
+        Returns
+        -------
+        _type_
+            _description_
+        """
+
+        if grad.ndim == 1:
+            grad = grad[:, np.newaxis]
+        if p is not None:
+            self.W = self.W + 2 * self.mu * grad * p[..., None]
+        else:
+            self.W = self.W + 2 * self.mu * grad
+
+        return self.W
 
     def update(self, x_n, d_n, alpha=1e-4, p=None):
         """_summary_
@@ -152,25 +175,18 @@ class SubbandLmsMc(SubbandAF):
         if self.norm:
             self.P = (
                 self.alpha * self.P
-                + (1 - self.alpha) * np.sum(self.input_buffer.conj() * self.input_buffer, axis=-1).real
+                + (1 - self.alpha)
+                * np.einsum('ijk, ijk -> i', self.input_buffer.conj(), self.input_buffer).real
+                / self.M
             )
-            grad = self.input_buffer * err[:, None].conj() / (self.P[:, None] + alpha)
+            grad = self.input_buffer * err[:, None, None].conj() / (self.P[:, None, None] + alpha)
         else:
-            grad = self.input_buffer * err[:, None].conj()  # LMS
+            grad = self.input_buffer * err[:, None, None].conj()  # LMS
 
         self.update_coef(grad, p=p)
 
-        # print((self.input_buffer).shape)
-        # print('filter_output:{}'.format(filter_output.shape))
-        # print('p:{}'.format((p).shape))
-
-        # if self.return_td:
-        #     # print('err:{}'.format(err.shape))
-        #     # err = self.transform_d.synthesis((self.input_buffer[:, 0] * np.squeeze(p))[..., None])
-        #     # err = self.transform_d.synthesis((filter_output * np.squeeze(p))[..., None])
-        #     # err = self.transform_d.synthesis((self.input_buffer[:, 0:1, None]))
-        #     err = self.transform_d.synthesis((err[..., None]))
-        # print('err:{}'.format(err.shape))
+        if self.return_td:
+            err = self.transform_d.synthesis(err)
 
         return err, self.W
 
@@ -181,7 +197,7 @@ def test(args):
     x = np.random.rand(16000 * 5, M)
     d = np.random.rand(16000 * 5)
 
-    subband_lms = SubbandLmsMc(filter_len=2, num_bands=frame_len * 2, hop_length=frame_len)
+    subband_lms = SubbandLmsMc(filter_len=2, num_bands=frame_len * 2, hop_length=frame_len, channel=M)
 
     for n in tqdm(range(len(x) - subband_lms.transform_x.hop_length)):
         if np.mod(n, subband_lms.transform_x.hop_length) == 0:
