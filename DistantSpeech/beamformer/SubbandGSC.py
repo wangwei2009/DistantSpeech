@@ -35,6 +35,8 @@ from DistantSpeech.adaptivefilter.SubbandLMS import SubbandLMS
 from DistantSpeech.beamformer.utils import DelaySamples, DelayFrames
 from DistantSpeech.beamformer.fixedbeamformer import TimeAlignment
 from DistantSpeech.adaptivefilter.feature import Emphasis, FilterDcNotch16
+from DistantSpeech.adaptivefilter.SubbandLmsMc import SubbandLmsMc
+from DistantSpeech.noise_estimation.omlsa_multi import NsOmlsaMulti
 
 
 class DelayObj(object):
@@ -95,7 +97,13 @@ class SubbandGSC(beamformer):
         for m in range(self.M):
             self.bm.append(SubbandLMS(filter_len=2, num_bands=frameLen * 2, mu=1e-1))
 
-        self.aic_filter = FastFreqLms(filter_len=frameLen, n_channels=self.M, mu=0.1, alpha=0.9, non_causal=True)
+        self.aic_filter = SubbandLmsMc(
+            filter_len=2,
+            num_bands=frameLen * 2,
+            channel=self.M,
+            mu=0.01,
+            alpha=0.8,
+        )
 
         self.delay_fbf = DelaySamples(self.frameLen, int(frameLen))
 
@@ -112,8 +120,12 @@ class SubbandGSC(beamformer):
         for _ in range(self.M):
             self.dc_notch_mic.append(FilterDcNotch16(radius=0.98))
 
-        self.bm_output_n_frq = np.zeros((self.bm[0].half_band, self.M), dtype=complex)
+        self.bm_output_n = np.zeros((self.frameLen, self.M))
         self.W_aic = np.zeros((self.bm[0].half_band, 2, self.M), dtype=complex)
+
+        self.omlsa_multi = NsOmlsaMulti(nfft=frameLen * 2, cal_weights=True, M=self.M)
+        self.transform_fbf = Transform(n_fft=frameLen * 2, hop_length=frameLen, channel=1)
+        self.transform_bm = Transform(n_fft=frameLen * 2, hop_length=frameLen, channel=self.M)
 
     def fixed_delay(self):
         pass
@@ -154,12 +166,15 @@ class SubbandGSC(beamformer):
         """
         pass
 
-    def process(self, x):
+    def process(self, x, postfilter=False):
         """
         process core function
         :param x: input time signal, (n_chs, n_samples)
         :return: enhanced signal, (n_samples,)
         """
+
+        for m in range(self.M):
+            x[m, :], self.dc_notch_mic[m].mem = self.dc_notch_mic[m].filter_dc_notch16(x[m, :])
 
         output = np.zeros(x.shape[1])
 
@@ -175,7 +190,9 @@ class SubbandGSC(beamformer):
         frameNum = int((x.shape[1]) / self.frameLen)
 
         p = np.zeros((self.spp.half_bin, frameNum))
+        G = np.zeros((self.spp.half_bin, frameNum))
 
+        t = 0
         for n in range(frameNum):
             x_n = x[:, n * self.frameLen : (n + 1) * self.frameLen]
 
@@ -195,25 +212,16 @@ class SubbandGSC(beamformer):
             # adaptive block matrix
             # x_n = self.delay_obj_bm.delay(x_n)
             for m in range(self.M):
-                self.bm_output_n_frq[:, m], _ = self.bm[m].update(
+                self.bm_output_n[:, m], _ = self.bm[m].update(
                     fixed_output[:, 0],
                     x_aligned[:, m],
                     p=p[:, n : n + 1],
                 )
-                # bm_output[n * self.frameLen : (n + 1) * self.frameLen, m] = np.squeeze(bm_output_n)
+                bm_output[n * self.frameLen : (n + 1) * self.frameLen, m] = np.squeeze(self.bm_output_n[:, m])
 
             # # # # fix delay
             fixed_output = self.delay_fbf.delay(fixed_output)
             # fixed_output = fixed_output.T
-
-            Y = self.transform_fixed.stft(fixed_output)
-            print(Y.shape)
-
-            aic_output_tmp = np.zeros((self.bm[0].half_band, 2, self.M), dtype=complex)
-            for m in range(self.M):
-                aic_output_tmp[:, :, m] = self.W_aic[:, :, m] * self.bm_output_n_frq[:, m : m + 1]
-            aic_output = np.sum(aic_output_tmp, axis=-1)
-            # err = d_n - filter_output
 
             # AIC block
             output_n, _ = self.aic_filter.update(
@@ -222,6 +230,25 @@ class SubbandGSC(beamformer):
                 p=1 - p[:, n : n + 1],
             )
 
+            if postfilter:
+                Y = self.transform_fbf.stft(output_n)
+                U = self.transform_bm.stft(bm_output)
+
+                self.omlsa_multi.estimation(
+                    np.real(Y[:, 0, 0] * np.conj(Y[:, 0, 0])), np.real(U[:, 0, :] * np.conj(U[:, 0, :]))
+                )
+
+                # post-filter
+                # G[:, t] = np.sqrt(self.omlsa_multi.G)
+                G[:, t] = np.sqrt(self.omlsa_multi.xi_hat)
+                t += 1
+                Y[:, 0, 0] = Y[:, 0, 0] * np.sqrt(self.omlsa_multi.G)
+                # output_n = self.transform_fbf.istft(Y)
+
+            # output[n * self.frameLen : (n + 1) * self.frameLen] = fixed_output[:, 0]
+            # output[n * self.frameLen : (n + 1) * self.frameLen] = np.squeeze(bm_output[:, 0])
+            output[n * self.frameLen : (n + 1) * self.frameLen] = np.squeeze(output_n)
+
             # output[n * self.frameLen : (n + 1) * self.frameLen] = bm_d[0, :]
             fix_output[n * self.frameLen : (n + 1) * self.frameLen] = fixed_output[:, 0]
             output[n * self.frameLen : (n + 1) * self.frameLen] = np.squeeze(output_n)
@@ -229,7 +256,7 @@ class SubbandGSC(beamformer):
             #     n * self.frameLen : (n + 1) * self.frameLen, 0
             # ]
 
-        return output, fix_output, bm_output, p
+        return output, fix_output, bm_output, G
 
 
 def main(args):
