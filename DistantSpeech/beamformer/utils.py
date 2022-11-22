@@ -124,6 +124,24 @@ def load_wav(filepath):
     return wavdata, sr  # return M*L ndarray
 
 
+def pcmread(filepath):
+    """read pcm file, return data range in [-1.0, 1.0]
+
+    Parameters
+    ----------
+    filepath : str
+        pcm file name
+
+    Returns
+    -------
+    x : np.array
+        pcm data, [samples, ]
+    """
+    x = np.memmap(filepath, dtype='h', mode='r') / 32768.0
+
+    return x
+
+
 def load_pcm(filepath):
     """
     load all wav file in a directory
