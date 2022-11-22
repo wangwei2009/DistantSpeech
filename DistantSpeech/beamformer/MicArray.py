@@ -18,7 +18,9 @@ def sph2cart(azimuth, elevation, r):
 
 
 class MicArray(object):
-    def __init__(self, arrayType='circular', r=0.032, c=343, M=4, n_fft=256):
+    def __init__(
+        self, arrayType='circular', r=0.032, c=343, M=4, n_fft=256, energy_absorption=0.7, room_size=[5.0, 3.0, 3.0]
+    ):
         self.arrayType = arrayType
         self.c = c
         self.r = r
@@ -35,7 +37,8 @@ class MicArray(object):
         self.array_type = arrayType
         self.mic_loc = np.zeros((M, 3))
         self.mic_loc = self.array_init()
-        self.array_sim = ArraySim(coordinate=self.mic_loc)
+        # self.array_sim = ArraySim(coordinate=self.mic_loc)
+        self.array_sim = ArraySim(coordinate=self.mic_loc, energy_absorption=energy_absorption, room_size=room_size)
 
         """
         # %                   ^ +z
