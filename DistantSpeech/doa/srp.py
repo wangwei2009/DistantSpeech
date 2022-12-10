@@ -4,12 +4,15 @@ import numpy as np
 from DistantSpeech.beamformer.MicArray import MicArray
 from DistantSpeech.transform.transform import Transform
 from DistantSpeech.beamformer.utils import pmesh
+from DistantSpeech.noise_estimation.mcra import NoiseEstimationMCRA
 
 
 class srp(object):
     def __init__(self, mic_array: MicArray) -> None:
         self.mic_array = mic_array
         self.transform = Transform(channel=mic_array.M, n_fft=mic_array.n_fft, hop_length=int(mic_array.n_fft / 2))
+        self.spp = NoiseEstimationMCRA(nfft=mic_array.n_fft)
+        self.spp.L = 65
 
     def compute_angle_spectrum(self, x, phat=True, resolution=1):
         """steer response power
@@ -26,22 +29,28 @@ class srp(object):
         Returns
         -------
         angle_spectrum : np.array
-            angle spectrum, [360, half_bin]
+            angle spectrum, [360, n_frame]
         """
         y = self.transform.stft(x)  # [bins, frames, M]
-        print(y.shape)
-
         n_frame = y.shape[1]
+        p = np.zeros(y[..., 0].shape)
+
+        for n in range(n_frame):
+            self.spp.estimation(y[:, n, 0])
+            p[:, n] = self.spp.p
+
+        p_frame = np.mean(p[32:64], axis=0)
+
         angle_spectrum = np.zeros((360, n_frame))
         for angle in tqdm(np.arange(0, 360, resolution)):
             steer_vecotr = self.mic_array.steering_vector(look_direction=angle)  # [bin, M]
             for n in range(n_frame):
                 y_p = steer_vecotr.conj() * y[:, n, :]
                 if phat:
-                    y_p = y_p / np.abs(y_p)
+                    y_p = y_p / (np.abs(y_p) + 1e-6)
                 angle_spectrum[angle : angle + resolution, n] = np.sum(np.abs(np.sum(y_p, axis=-1)))
 
-        return angle_spectrum
+        return angle_spectrum, p
 
     def show(self, x):
         angle_spectrum = self.compute_angle_spectrum(x)
