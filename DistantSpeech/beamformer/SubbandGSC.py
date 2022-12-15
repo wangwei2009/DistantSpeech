@@ -1,7 +1,8 @@
 """
-overlap-save frequency domain GSC
+Subband GSC beamformer
 refer to
-    Efficient frequency-domain realization of robust generalized, sidelobe cancellers
+    Robust Adaptive Beamforming Algorithm using Instantaneous Direction of Arrival 
+    with Enhanced Noise Suppression Capability. Acoustics, Speech, and Signal Processing, 1988. ICASSP-88., 1988 International Conference on. 1. I-133 . 10.1109/ICASSP.2007.366634. 
 Author:
     Wang Wei
 """
@@ -183,6 +184,7 @@ class SubbandGSC(beamformer):
 
         # adaptive block matrix path
         bm_output = np.zeros((x.shape[1], self.M))
+        aligned_output = np.zeros((x.shape[1], self.M))
         fix_output = np.zeros((x.shape[1],))
         aic_output = np.zeros((x.shape[1],))
 
@@ -197,12 +199,13 @@ class SubbandGSC(beamformer):
             x_n = x[:, n * self.frameLen : (n + 1) * self.frameLen]
 
             x_aligned = self.time_alignment.process(x_n.T)
+            aligned_output[n * self.frameLen : (n + 1) * self.frameLen, :] = x_aligned
 
             D = self.transform.stft(x_aligned)
 
             fixed_output = self.fixed_beamformer(x_aligned)
 
-            p[:, n] = self.spp.estimation(D[:, 0, :], diag_value=1e-2)
+            p[:, n] = self.spp.estimation(D[:, 0, :])
             # p[:, n] = np.sqrt(p[:, n])
             # p[:, n] = p[:, n] ** 2
 
@@ -256,7 +259,7 @@ class SubbandGSC(beamformer):
             #     n * self.frameLen : (n + 1) * self.frameLen, 0
             # ]
 
-        return output, fix_output, bm_output, G
+        return output, fix_output, bm_output, p, aligned_output
 
 
 def main(args):
