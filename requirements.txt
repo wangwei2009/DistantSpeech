@@ -62,7 +62,7 @@ pandas==1.4.2
 pandocfilters==1.5.0
 parso==0.8.3
 pathspec==0.9.0
-pesq==0.0.3
+# pesq==0.0.3
 pexpect==4.8.0
 pickleshare==0.7.5
 Pillow==9.1.0
@@ -82,7 +82,7 @@ pycparser==2.21
 pyflakes==2.4.0
 Pygments==2.12.0
 pyparsing==3.0.8
-pypesq==1.2.4
+# pypesq==1.2.4
 pyroomacoustics==0.6.0
 pyrsistent==0.18.1
 pystoi==0.3.3
