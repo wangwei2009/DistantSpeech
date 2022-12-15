@@ -74,24 +74,25 @@ class Idoa(object):
         self.beta = 7.6
         self.beta_n = np.zeros((n_theta,))  # eq.9, target speech present
 
+        self.p = np.zeros((half_bin, n_theta))
+
         self.emphsis = []
         for m in range(self.mic_array.M):
             self.emphsis.append(Emphasis())
 
-    def process(self, x, pre_emphsis=False):
-        """spatial speech presence probability estimation
+    def estimate(self, X):
+        """spatial speech presence probability estimation core function
 
         Parameters
         ----------
-        x : np.array
-            multichannel input signal, [samples, channels]
+        X : complex np.array
+            input multichannel frequency data, [half_bin, n_frames, channels]
 
+        Returns
+        -------
+        p : np.array
+            speech presence probability, [half_bin, n_frames, n_theta]
         """
-        if pre_emphsis:
-            for m in range(self.mic_array.M):
-                x[:, m] = self.emphsis[m].pre_emphsis(x[:, m])
-        X = self.transform.stft(x)
-
         half_bin, n_frames, M = X.shape
         assert half_bin == self.half_bin
 
@@ -104,7 +105,7 @@ class Idoa(object):
         B_hat = np.zeros((half_bin, n_frames, idoa_dim), dtype=complex)  # estimated RTF
 
         alpha = 0.02
-        self.p = np.zeros((half_bin, n_theta))
+        p = np.zeros((half_bin, n_frames, n_theta))
 
         beta = 7.6
         beta_n = np.zeros((n_frames, n_theta))  # eq.9, target speech present
@@ -141,6 +142,36 @@ class Idoa(object):
 
             # eq. 12, Target speech presence probability
             self.p = self.Lambda / (1 + self.Lambda)
+            p[:, n, :] = self.p[:]
+
+        return p
+
+    def process(self, x, pre_emphsis=False):
+        """spatial speech presence probability estimation
+
+        Parameters
+        ----------
+        x : np.array
+            multichannel input signal, [samples, channels]
+
+        """
+
+        if pre_emphsis:
+            for m in range(self.mic_array.M):
+                x[:, m] = self.emphsis[m].pre_emphsis(x[:, m])
+
+        X = self.transform.stft(x)
+
+        half_bin, n_frames, M = X.shape
+        assert half_bin == self.half_bin
+
+        p = self.estimate(X)
+
+        out = np.maximum(np.mean(p[64:128, :, target_direction], axis=0), 0.01) * X[:, 0, 0]
+
+        output = self.transform.istft(out)
+
+        return output
 
 
 if __name__ == "__main__":
@@ -167,7 +198,7 @@ if __name__ == "__main__":
         # filename = '/home/wangwei/work/DistantSpeech/samples/audio_samples/xmos/meeting/2/ch4/音轨-{}.wav'.format(n)
         # filename = '/home/wangwei/work/DistantSpeech/samples/audio_samples/xmos/anechoic/1/ch4/音轨-{}.wav'.format(n)
         # filename = '/home/wangwei/work/DistantSpeech/samples/audio_samples/xmos/office/1/ch4/音轨-{}.wav'.format(n)
-        # filename = '/home/wangwei/work/DistantSpeech/samples/audio_samples/xmos/aioffice/5/ch4/音轨-{}.wav'.format(n)
+        filename = '/home/wangwei/work/DistantSpeech/samples/audio_samples/xmos/aioffice/5/ch4/音轨-{}.wav'.format(n)
         data_ch = audioread(filename)
         array_data.append(data_ch)
     x = np.array(array_data).T
@@ -183,16 +214,13 @@ if __name__ == "__main__":
 
     Out = np.zeros((x.shape[0],))
 
-    target_direction = 197
+    target_direction = 135
 
     for n in tqdm(range(n_frames)):
-        x_n = x[n * hop_len : (n + 1) * hop_len, :]
-        X = idoa.transform.stft(x_n)
-        idoa.process(x_n)
+        x_n = x[n * hop_len : n * hop_len + hop_len, :]
+        output = idoa.process(x_n)
         p[:, n, :] = idoa.p
-        out = np.maximum(np.mean(p[64:128, n, target_direction]), 0.01) * X[:, 0, 0]
-        # out = X[:, 0, 0]
-        Out[n * hop_len : (n + 1) * hop_len] = idoa.transform.istft(out)
+        Out[n * hop_len : (n + 1) * hop_len] = output
 
     array2D = p[:, :, target_direction].T
 
@@ -214,4 +242,4 @@ if __name__ == "__main__":
     plt.show()
     plt.savefig('p.png')
 
-    save_audio('out_spp1.wav', Out)
+    save_audio('out_spp.wav', Out)
