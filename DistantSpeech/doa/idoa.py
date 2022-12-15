@@ -80,13 +80,15 @@ class Idoa(object):
         for m in range(self.mic_array.M):
             self.emphsis.append(Emphasis())
 
-    def estimate(self, X):
+    def estimate(self, X, theta=None):
         """spatial speech presence probability estimation core function
 
         Parameters
         ----------
         X : complex np.array
             input multichannel frequency data, [half_bin, n_frames, channels]
+        theta : bool or int, optional
+            if specified, only compute theta dirction, otherwise (0, 360), by default None
 
         Returns
         -------
@@ -120,11 +122,17 @@ class Idoa(object):
             B_hat = self.Y_xcorr_smooth / self.Y_smooth[:, np.newaxis]
             # print(B_hat.shape)
 
-            for theta_n in range(n_theta):
-                den = np.linalg.norm(self.Psi[:, :, theta_n], axis=-1) * np.linalg.norm(B_hat[:, :], axis=-1)
-                Delta[:, theta_n] = np.real(np.einsum('ij,ij->i', self.Psi[:, :, theta_n].conj(), B_hat[:, :])) / (
+            if theta is not None:
+                den = np.linalg.norm(self.Psi[:, :, theta], axis=-1) * np.linalg.norm(B_hat[:, :], axis=-1)
+                Delta[:, theta] = np.real(np.einsum('ij,ij->i', self.Psi[:, :, theta].conj(), B_hat[:, :])) / (
                     den + 1e-6
                 )  # eq.8
+            else:
+                for theta_n in range(n_theta):
+                    den = np.linalg.norm(self.Psi[:, :, theta_n], axis=-1) * np.linalg.norm(B_hat[:, :], axis=-1)
+                    Delta[:, theta_n] = np.real(np.einsum('ij,ij->i', self.Psi[:, :, theta_n].conj(), B_hat[:, :])) / (
+                        den + 1e-6
+                    )  # eq.8
 
             avg = (1 - self.p) * 0.8
             self.mu_Delta = avg * self.mu_Delta + (1 - avg) * Delta
@@ -146,14 +154,20 @@ class Idoa(object):
 
         return p
 
-    def process(self, x, pre_emphsis=False):
+    def process(self, x, theta=None, pre_emphsis=False):
         """spatial speech presence probability estimation
 
         Parameters
         ----------
         x : np.array
             multichannel input signal, [samples, channels]
+        theta : bool or int, optional
+            if specified, only compute theta dirction, otherwise (0, 360), by default None
 
+        Returns
+        -------
+        output : np.array
+            enhanced signal, [samples, ]
         """
 
         if pre_emphsis:
@@ -165,7 +179,7 @@ class Idoa(object):
         half_bin, n_frames, M = X.shape
         assert half_bin == self.half_bin
 
-        p = self.estimate(X)
+        p = self.estimate(X, theta=theta)
 
         out = np.maximum(np.mean(p[64:128, :, target_direction], axis=0), 0.01) * X[:, 0, 0]
 
@@ -218,7 +232,7 @@ if __name__ == "__main__":
 
     for n in tqdm(range(n_frames)):
         x_n = x[n * hop_len : n * hop_len + hop_len, :]
-        output = idoa.process(x_n)
+        output = idoa.process(x_n, theta=target_direction)
         p[:, n, :] = idoa.p
         Out[n * hop_len : (n + 1) * hop_len] = output
 
