@@ -53,6 +53,7 @@ class Aec(BaseFilter):
         n_channels=1,
         alpha=0.8,
         prop=True,
+        two_path=True,
         non_causal=False,
     ):
         BaseFilter.__init__(self, filter_len=filter_len, mu=mu)
@@ -101,6 +102,7 @@ class Aec(BaseFilter):
         self.Dvar1 = 0
         self.Dvar2 = 0  #
 
+        self.two_path = two_path
         self.prop = prop
 
         self.window = 0.5 - 0.5 * np.cos(
@@ -279,10 +281,10 @@ class Aec(BaseFilter):
         #     -self.block_len :, :
         # ]
         y_b = ifft(np.sum(self.X * self.W, axis=1, keepdims=True), axis=0)[-self.block_len :, :]
-        y = ifft(np.sum(self.X * self.foreground, axis=1, keepdims=True), axis=0)[
-            -self.block_len :, :
-        ]
-        y_f = y
+        if self.two_path:
+            y_f = ifft(np.sum(self.X * self.foreground, axis=1, keepdims=True), axis=0)[
+                -self.block_len :, :
+            ]
 
         # use causal filter to estimate non-causal system will introduce a delay(filter_len/2) compare to expected signal
         if self.non_causal:
@@ -290,12 +292,13 @@ class Aec(BaseFilter):
 
         if d_n_vec.ndim == 1:
             d_n_vec = d_n_vec[:, np.newaxis]
-        e = d_n_vec - y
+        out = d_n_vec - y_b
         e_b = d_n_vec - y_b
         e_f = d_n_vec - y_f
 
-        e_f, e_b, y_f, y_b = self.transfer_logic(e_f, e_b, y, y_b)
-        out = d_n_vec - y_f
+        if self.two_path:
+            e_f, e_b, y_f, y_b = self.transfer_logic(e_f, e_b, y_f, y_b)
+            out = d_n_vec - y_f
         assert id(y_f) != id(y_b)
 
         e_pad = np.concatenate((np.zeros((self.block_len, 1)), e_b), axis=0)
@@ -346,8 +349,8 @@ class Aec(BaseFilter):
         # self.mu_opt[:2, 0] = 0.1
 
         if self.cnt < 5:
-            self.cnt = self.cnt + 1
             self.mu_opt = np.ones((self.half_bin, self.n_channels)) * 0.1
+        self.cnt = self.cnt + 1
 
         eps = 1e-6
         grad = self.X.conj() * E / (self.P + eps)
