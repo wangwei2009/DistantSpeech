@@ -1,6 +1,6 @@
 """
 coherence-based speech enhancement Algorithms
-==============
+================
 
 implement some coherence-based dual-mic noise reduction algorithms
 

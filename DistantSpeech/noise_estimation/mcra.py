@@ -32,7 +32,7 @@ class NoiseEstimationMCRA(NoiseEstimationBase):
         if len(Y.shape) > 1:
             Y = Y[:, 0]
 
-        assert len(Y) == self.half_bin
+        assert len(Y) == self.half_bin, 'len(Y):{} != half_bin:{}'.format(len(Y), self.half_bin)
 
         for k in range(self.half_bin - 1):
             if self.frm_cnt == 0:
