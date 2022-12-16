@@ -20,6 +20,7 @@ jobs:
         pip install numpy wheel
         sudo apt install portaudio19-dev
         sudo apt-get install libsndfile1
+        pip install pesq pypesq
         pip install -r requirements.txt
         pip install -e .
         pip install pylint
