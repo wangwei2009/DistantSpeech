@@ -77,7 +77,6 @@ pandas==1.4.2
 pandocfilters==1.5.0
 parso==0.8.3
 pathspec==0.9.0
-pesq==0.0.3
 pexpect==4.8.0
 pickleshare==0.7.5
 Pillow==9.1.0
@@ -98,7 +97,6 @@ pycparser==2.21
 pyflakes==2.4.0
 Pygments==2.12.0
 pyparsing==3.0.8
-pypesq==1.2.4
 -e git+https://github.com/LCAV/pyroomacoustics.git@b3e36a6451e25bc700bc723e6d267645d43ac10f#egg=pyroomacoustics
 pyrsistent==0.18.1
 pystoi==0.3.3
