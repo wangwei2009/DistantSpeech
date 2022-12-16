@@ -154,7 +154,7 @@ class Idoa(object):
 
         return p
 
-    def process(self, x, theta=None, pre_emphsis=False):
+    def process(self, x, theta=None, default_direction=90, pre_emphsis=False):
         """spatial speech presence probability estimation
 
         Parameters
@@ -162,7 +162,9 @@ class Idoa(object):
         x : np.array
             multichannel input signal, [samples, channels]
         theta : bool or int, optional
-            if specified, only compute theta dirction, otherwise (0, 360), by default None
+            if specified, only estimate theta dirction, otherwise (0, 360), by default None
+        default_direction : int or float, optional
+            default enhance direction, by default 90
 
         Returns
         -------
@@ -180,6 +182,8 @@ class Idoa(object):
         assert half_bin == self.half_bin
 
         p = self.estimate(X, theta=theta)
+
+        target_direction = theta if theta is not None else default_direction
 
         out = np.maximum(np.mean(p[64:128, :, target_direction], axis=0), 0.01) * X[:, 0, 0]
 
