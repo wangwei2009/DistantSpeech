@@ -1,6 +1,6 @@
 """
 Multi-Channel Speech Presence Probability
-==============
+================
 
 ----------
 
@@ -21,7 +21,7 @@ from DistantSpeech.beamformer.MicArray import MicArray
 from DistantSpeech.beamformer.beamformer import beamformer
 from DistantSpeech.beamformer.utils import load_audio as audioread
 from DistantSpeech.beamformer.utils import save_audio as audiowrite
-from DistantSpeech.beamformer.utils import load_wav, visual, DelayBuffer
+from DistantSpeech.beamformer.utils import load_wav, visual, DelayFrames
 from DistantSpeech.transform.transform import Transform
 
 
@@ -69,10 +69,12 @@ class DualMicKws(beamformer):
 
         self.transformer = Transform(n_fft=self.nfft, hop_length=self.hop, channel=self.M)
 
-        self.anc = FastFreqLms(filter_len=frameLen, mu=0.1, alpha=0.1)
-        self.cleaner_filter = FastFreqLms(filter_len=frameLen, mu=0.1, alpha=0.1)
+        self.anc = FastFreqLms(filter_len=frameLen, mu=0.1, alpha=0.1, non_causal=True)
+        self.cleaner_filter = FastFreqLms(filter_len=frameLen, mu=0.1, alpha=0.1, non_causal=True)
 
-        self.delay_obj = DelayBuffer(self.frameLen, 18)
+        delay_time = int(1.5 * self.fs)
+        delay_frame = int(delay_time / self.frameLen)
+        self.delay_obj = DelayFrames(self.frameLen, delay_frame)
 
         self.delay_obj_bm = DelayObj(self.frameLen, 8, channel=self.M)
 
@@ -237,7 +239,7 @@ def test_delay_buffer():
     delay = 0
     buffer_len = 3
     x_vec = np.array([1, 2, 3])
-    delay_obj = DelayBuffer(buffer_len, delay)
+    delay_obj = DelayFrames(buffer_len, delay)
 
     x_vec_delayed = delay_obj.delay(x_vec)
     print(x_vec_delayed)
