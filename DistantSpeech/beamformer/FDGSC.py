@@ -1,12 +1,15 @@
 """
 overlap-save frequency domain GSC
-refer to
-    Efficient frequency-domain realization of robust generalized, sidelobe cancellers
-Author:
-    Wang Wei
+==================
+
+----------
+
+..    [1].Efficient frequency-domain realization of robust generalized, sidelobe cancellers.
+
 """
 import argparse
 from time import time
+from turtle import update
 
 import numpy as np
 from scipy.signal import windows
@@ -21,42 +24,8 @@ from DistantSpeech.noise_estimation.mcspp_base import McSppBase
 from DistantSpeech.transform.transform import Transform
 from DistantSpeech.noise_estimation import McSpp
 from DistantSpeech.transform.multirate import frac_delay, fractional_delay_filter_bank
-
-
-def fir_filter(x, fir_coeffs, fir_cache):
-    """_summary_
-
-    Parameters
-    ----------
-    x : np.array
-        input multichannel data, [chs, samples]
-    filter_coeffs : np.array
-        fir filter coeffs, [chs, fir_filter_len]
-    fir_cache : np.array
-        fir filter cache, [chs, fir_filter_len-1]
-
-    Returns
-    -------
-    _type_
-        _description_
-    """
-
-    M, input_len = x.shape
-    fir_filter_len = fir_coeffs.shape[1]
-
-    fir_input = np.zeros((fir_filter_len - 1 + input_len, M))
-    fir_input[: fir_filter_len - 1, :] = fir_cache[:]
-    fir_input[fir_filter_len - 1 :, :] = x.T
-
-    output = np.zeros(x.shape)
-
-    fir_coeffs = np.fliplr(fir_coeffs)
-
-    for m in range(M):
-        for n in range(input_len):
-            output[m, n] = fir_coeffs[m : m + 1, :] @ fir_input[n : n + fir_filter_len, m : m + 1]
-
-    return output, x[:, -fir_filter_len + 1 :].T
+from DistantSpeech.adaptivefilter.feature import Emphasis, FilterDcNotch16
+from DistantSpeech.beamformer.fixedbeamformer import TimeAlignment
 
 
 class DelayObj(object):
@@ -88,25 +57,17 @@ class FDGSC(beamformer):
         self,
         mic_array: MicArray,
         frameLen=256,
-        hop=None,
-        nfft=None,
-        fs=16000,
         angle=[197, 0],
     ):
 
-        beamformer.__init__(self, mic_array, frame_len=frameLen, hop=hop, nfft=nfft, fs=fs)
+        beamformer.__init__(
+            self,
+            mic_array,
+            frame_len=frameLen,
+        )
         self.angle = np.array(angle) / 180 * np.pi if isinstance(angle, list) else angle
 
-        # construct fraction delay filter for time-alignment in fixed beamformer
-        self.tau = mic_array.compute_tau(self.angle)
-        print('tau:{}'.format(self.tau))
-        self.tau = -(self.tau - np.max(self.tau))
-        delay_samples = np.array(self.tau)[:, 0] * mic_array.fs
-        print('delay_samples:{}'.format(delay_samples))
-        self.delay_filter = fractional_delay_filter_bank(delay_samples)
-        self.delay_filter_len = self.delay_filter.shape[1]
-        print('self.delay_filter:{}'.format(self.delay_filter.shape))
-        self.fir_cache = np.zeros((self.delay_filter_len - 1, self.M))
+        self.time_alignment = TimeAlignment(mic_array, angle=self.angle)
 
         self.gamma = mic_array.gamma
         self.window = windows.hann(self.frameLen, sym=False)
@@ -125,16 +86,20 @@ class FDGSC(beamformer):
         for m in range(self.M):
             self.bm.append(FastFreqLms(filter_len=frameLen, mu=0.1, alpha=0.9, non_causal=True))
 
-        self.aic_filter = FastFreqLms(filter_len=frameLen, n_channels=self.M, mu=0.1, alpha=0.9, non_causal=True)
+        self.aic_filter = FastFreqLms(filter_len=frameLen, n_channels=self.M, mu=0.1, alpha=0.9, non_causal=False)
 
         self.delay_fbf = DelaySamples(self.frameLen, int(frameLen / 2))
 
-        self.delay_obj_bm = DelayObj(self.frameLen, 8, channel=self.M)
+        self.delay_obj_bm = DelayObj(self.frameLen, 40, channel=self.M)
 
         self.spp = McSpp(nfft=frameLen * 2, channels=self.M)
         # self.spp = McSppBase(nfft=frameLen * 2, channels=self.M)
         self.transform = Transform(n_fft=frameLen * 2, hop_length=frameLen, channel=self.M)
         self.spp.mcra.L = 10
+
+        self.dc_notch_mic = []
+        for _ in range(self.M):
+            self.dc_notch_mic.append(FilterDcNotch16(radius=0.98))
 
     def fixed_delay(self):
         pass
@@ -153,9 +118,7 @@ class FDGSC(beamformer):
             output data, [1, samples]
         """
 
-        output, self.fir_cache = fir_filter(x, self.delay_filter, self.fir_cache)
-
-        return np.mean(output, axis=0, keepdims=True)
+        return np.mean(x, axis=1, keepdims=True)
         # return output[0:1, :]
 
     def blocking_matrix(self, x):
@@ -186,6 +149,9 @@ class FDGSC(beamformer):
 
         output = np.zeros(x.shape[1])
 
+        # for m in range(self.M):
+        #     x[m, :], self.dc_notch_mic[m].mem = self.dc_notch_mic[m].filter_dc_notch16(x[m, :])
+
         # adaptive block matrix path
         bm_output = np.zeros((x.shape[1], self.M))
         fix_output = np.zeros((x.shape[1],))
@@ -195,25 +161,33 @@ class FDGSC(beamformer):
 
         p = np.zeros((self.spp.half_bin, frameNum))
 
-        D = self.transform.stft(np.transpose(x))
-
         for n in range(frameNum):
             x_n = x[:, n * self.frameLen : (n + 1) * self.frameLen]
 
-            p[:, n] = self.spp.estimation(D[:, n, :])
-            # p[:, n] = np.sqrt(p[:, n])
+            x_aligned = self.time_alignment.process(x_n.T)
 
-            # fixed beamformer path
-            fixed_output = self.fixed_beamformer(x_n)
+            D = self.transform.stft(x_aligned)
+
+            fixed_output = self.fixed_beamformer(x_aligned)
+
+            p[:, n] = self.spp.estimation(D[:, 0, :], diag_value=1e-2)
+            # p[:, n] = np.sqrt(p[:, n])
+            # p[:, n] = p[:, n] ** 2
+
+            # # fixed beamformer path
+            # fixed_output = self.fixed_beamformer(x_n)
 
             # adaptive block matrix
+            # x_n = self.delay_obj_bm.delay(x_n)
             for m in range(self.M):
-                bm_output_n, _ = self.bm[m].update(fixed_output.T, x_n[m, :], p=p[:, n : n + 1], fir_truncate=30)
+                bm_output_n, _ = self.bm[m].update(
+                    fixed_output, x_n[m, :], p=p[:, n : n + 1], fir_truncate=30, filter_p=True, update=True
+                )
                 bm_output[n * self.frameLen : (n + 1) * self.frameLen, m] = np.squeeze(bm_output_n)
 
-            # fix delay
-            # fixed_output = self.delay_fbf.delay(fixed_output.T)
-            fixed_output = fixed_output.T
+            # # # fix delay
+            fixed_output = self.delay_fbf.delay(fixed_output)
+            # fixed_output = fixed_output.T
 
             # AIC block
             output_n, _ = self.aic_filter.update(
@@ -223,18 +197,17 @@ class FDGSC(beamformer):
                 fir_truncate=30,
             )
 
-            # output[n * self.frameLen : (n + 1) * self.frameLen] = fixed_output[0, :]
+            # output[n * self.frameLen : (n + 1) * self.frameLen] = bm_d[0, :]
+            # output[n * self.frameLen : (n + 1) * self.frameLen] = fixed_output[:, 0]
             output[n * self.frameLen : (n + 1) * self.frameLen] = np.squeeze(output_n)
-            # output[n * self.frameLen : (n + 1) * self.frameLen] = np.squeeze(
-            #     bm_output[n * self.frameLen : (n + 1) * self.frameLen, 0]
-            # )
+            # output[n * self.frameLen : (n + 1) * self.frameLen] = bm_output[
+            #     n * self.frameLen : (n + 1) * self.frameLen, 0
+            # ]
 
         return output, p
 
 
 def main(args):
-    target = audioread("wav/target.wav")
-    interf = audioread("wav/interf.wav")
 
     frameLen = 1024
     hop = frameLen / 2
@@ -242,21 +215,19 @@ def main(args):
     nfft = 256
     r = 0.032
     fs = 16000
+    M = 4
 
     # start = tim
 
-    MicArrayObj = MicArray(arrayType='linear', r=0.05, M=3)
+    MicArrayObj = MicArray(arrayType='linear', r=0.05, M=M)
     angle = np.array([197, 0]) / 180 * np.pi
 
-    x = MicArrayObj.array_sim.generate_audio(target, interference=interf, snr=0)
-    print(x.shape)
-    audiowrite('wav/target_90_interf_30.wav', x.transpose())
-
+    x = np.random.randn(M, 16000 * 5)
     start = time()
 
-    fdgsc = FDGSC(MicArrayObj, frameLen, hop, nfft, fs)
+    fdgsc = FDGSC(MicArrayObj, frameLen, angle)
 
-    yout = fdgsc.process(x)
+    yout, _ = fdgsc.process(x)
 
     print(yout.shape)
 
