@@ -6,11 +6,20 @@ from tqdm import tqdm
 from DistantSpeech.beamformer.utils import load_audio
 from DistantSpeech.adaptivefilter import BaseFilter
 from DistantSpeech.transform.subband import Subband
+from DistantSpeech.transform.transform import Transform
 
 
 class SubbandAF(BaseFilter):
     def __init__(
-        self, filter_len=2, num_bands=512, mu=0.1, normalization=True, alpha=0.9, m=2, hop_length=None, input_td=False
+        self,
+        filter_len=2,
+        num_bands=512,
+        mu=0.1,
+        normalization=True,
+        alpha=0.9,
+        m=2,
+        hop_length=None,
+        input_td=False,
     ):
         self.filter_len = filter_len
         half_band = int(num_bands / 2) + 1
@@ -25,10 +34,9 @@ class SubbandAF(BaseFilter):
         self.P = np.zeros((half_band,))
 
         # r = int(n_fft / hop_length / 2)  # Decimation factor
-        if hop_length is None:
-            hop_length = int(num_bands / 2)
-        self.transform_x = Subband(n_fft=num_bands, hop_length=hop_length, m=m)
-        self.transform_d = Subband(n_fft=num_bands, hop_length=hop_length, m=m)
+        self.hop_length = int(num_bands / 2) if hop_length is None else hop_length
+        self.transform_x = Transform(n_fft=num_bands, hop_length=self.hop_length)
+        self.transform_d = Transform(n_fft=num_bands, hop_length=self.hop_length)
 
         self.return_td = False
 
@@ -44,8 +52,8 @@ class SubbandAF(BaseFilter):
 
     def update_input_data(self, x_n, d_n, alpha=1e-4, p=None):
         if 'float' in str(x_n.dtype) and 'float' in str(d_n.dtype):
-            x_n = self.transform_x.analysis(x_n)
-            d_n = self.transform_d.analysis(d_n)
+            x_n = np.squeeze(self.transform_x.analysis(x_n))
+            d_n = np.squeeze(self.transform_d.analysis(d_n))
             self.return_td = True
         self.update_input(x_n)
 
@@ -56,6 +64,20 @@ class SubbandAF(BaseFilter):
         raise NotImplementedError
 
     def update_coef(self, grad, p=None):
+        """subband filter update function
+
+        Parameters
+        ----------
+        grad : complex np.array
+            filter gradient, [half_bands, filter_len]
+        p : float or np.array
+            update probability, float or [half_bands, 1], by default None
+
+        Returns
+        -------
+        self.W : np.array
+            filter weights, [half_bands, filter_len]
+        """
 
         if grad.ndim == 1:
             grad = grad[:, np.newaxis]
@@ -67,6 +89,20 @@ class SubbandAF(BaseFilter):
         return self.W
 
     def compute_filter_output(self, W, X):
+        """compute subband filter response
+
+        Parameters
+        ----------
+        W : complex np.array
+            filter weights, , [self.half_band, filter_len]
+        X : complex np.array
+            input data, [self.half_band, filter_len]
+
+        Returns
+        -------
+        filter_output : complex np.array
+            filter response, [self.half_band,]
+        """
 
         assert W.shape == X.shape
 

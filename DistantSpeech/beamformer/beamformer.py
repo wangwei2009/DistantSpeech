@@ -166,7 +166,6 @@ class beamformer(object):
         frame_len=256,
         hop=None,
         nfft=None,
-        c=343,
         r=0.032,
         fs=16000,
     ):
@@ -183,7 +182,7 @@ class beamformer(object):
             self.nfft = int(frame_len)
         else:
             self.nfft = int(nfft)
-        self.c = c
+        self.c = self.MicArray.c
         self.r = r
         self.fs = fs
         self.half_bin = round(self.nfft / 2 + 1)

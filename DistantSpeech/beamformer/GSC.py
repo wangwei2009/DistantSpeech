@@ -1,3 +1,12 @@
+"""
+time domain GSC beamformer
+====================
+
+----------
+
+
+
+"""
 import numpy as np
 from scipy.signal import windows
 
@@ -7,31 +16,25 @@ from DistantSpeech.noise_estimation.omlsa_multi import NsOmlsaMulti
 from DistantSpeech.noise_estimation.mc_mcra import McMcra
 from DistantSpeech.noise_estimation.mcspp import McSpp
 from DistantSpeech.transform.transform import Transform
-from .beamformer import beamformer
+from DistantSpeech.beamformer.beamformer import beamformer
+from DistantSpeech.beamformer.fixedbeamformer import TimeAlignment
+from DistantSpeech.beamformer.MicArray import MicArray
+from DistantSpeech.adaptivefilter.FastFreqLms import FastFreqLms
+from DistantSpeech.adaptivefilter.feature import Emphasis, FilterDcNotch16
 
 
 class GSC(beamformer):
-    def __init__(self, MicArray, frameLen=256, hop=None, nfft=None, channels=4, c=343, r=0.032, fs=16000):
+    def __init__(
+        self,
+        mic_array: MicArray,
+        frameLen=256,
+        angle=[197, 0],
+    ):
+        beamformer.__init__(self, mic_array, frame_len=frameLen)
+        self.mic_array = mic_array
 
-        beamformer.__init__(self, MicArray)
-        self.MicArray = MicArray
-        self.frameLen = frameLen
-        if hop is None:
-            self.hop = int(frameLen // 2)
-        else:
-            self.hop = int(hop)
-        self.overlap = frameLen - hop
-        if nfft is None:
-            self.nfft = int(frameLen)
-        else:
-            self.nfft = int(nfft)
-        self.c = c
-        self.r = r
-        self.fs = fs
-        self.half_bin = round(nfft / 2 + 1)
-        self.M = channels
-        self.angle = np.array([197, 0]) / 180 * np.pi
-        self.gamma = MicArray.gamma
+        self.angle = np.array(angle) / 180 * np.pi if isinstance(angle, list) else angle
+        self.gamma = mic_array.gamma
         self.window = windows.hann(self.frameLen, sym=False)
         self.win_scale = np.sqrt(1.0 / self.window.sum() ** 2)
         self.freq_bin = np.linspace(0, self.half_bin - 1, self.half_bin)
@@ -41,12 +44,10 @@ class GSC(beamformer):
 
         self.transformer = Transform(n_fft=self.nfft, hop_length=self.hop, channel=self.M)
 
-        self.pad_data = np.zeros([MicArray.M, round(frameLen / 2)])
-        self.last_output = np.zeros(round(frameLen / 2))
+        # self.pad_data = np.zeros([mic_array.M, round(frameLen / 2)])
+        # self.last_output = np.zeros(round(frameLen / 2))
 
         self.H = np.ones([self.M, self.half_bin], dtype=complex) / self.M
-
-        self.angle = np.array([0, 0]) / 180 * np.pi
 
         self.method = 'MVDR'
 
@@ -74,10 +75,101 @@ class GSC(beamformer):
         self.Yfbf = np.zeros((self.half_bin), dtype=complex)
 
         self.mcra = NoiseEstimationMCRA(nfft=self.nfft)
-        self.omlsa_multi = NsOmlsaMulti(nfft=self.nfft, cal_weights=True, M=channels)
-        self.mcspp = McSppBase(nfft=self.nfft, channels=channels)
-        self.mc_mcra = McMcra(nfft=self.nfft, channels=channels)
+        self.omlsa_multi = NsOmlsaMulti(nfft=self.nfft, cal_weights=True, M=self.M)
+        self.mcspp = McSppBase(nfft=self.nfft, channels=self.M)
+        self.mc_mcra = McMcra(nfft=self.nfft, channels=self.M)
         self.spp = self.mc_mcra
+
+        self.time_alignment = TimeAlignment(mic_array, angle=self.angle)
+        self.aic_filter = FastFreqLms(filter_len=frameLen, n_channels=self.M - 1)
+        self.dc_notch_mic = []
+        for _ in range(self.M):
+            self.dc_notch_mic.append(FilterDcNotch16(radius=0.98))
+
+    def fixed_beamformer(self, x):
+        """fixed beamformer
+
+        Parameters
+        ----------
+        x : np.array
+            input multichannel data, [samples, chs]
+
+        Returns
+        -------
+        np.array
+            output data, [samples, 1]
+        """
+
+        return np.mean(x, axis=1, keepdims=True)
+
+    def blocking_matrix(self, x):
+        """fixed blocking matrix
+
+        Parameters
+        ----------
+        x : np.array
+            input multichannel data, [samples, chs]
+
+        Returns
+        -------
+        bm_output : np.array
+            output data, [samples, chs-1]
+        """
+        samples, channels = x.shape
+        bm_output = np.zeros((samples, channels - 1))
+        for m in range(channels - 1):
+            bm_output[:, m] = x[:, m] - x[:, m + 1]
+
+        return bm_output
+
+    def aic(self, y_fbf, bm_output):
+        """adaptive interference cancellation block
+
+        Parameters
+        ----------
+        y_fbf : np.array
+            output from fixed beamformer, upper path, (n_samples, 1)
+        bm_output : np.array
+            output from blocking matrix output, lower path, (n_samples, n_chs)
+
+        Returns
+        -------
+        output_n : np.array
+            _description_
+        """
+        # AIC block
+        output_n, _ = self.aic_filter.update(bm_output, y_fbf, fir_truncate=30)
+
+        return output_n
+
+    def process1(self, x):
+
+        samples, channels = x.shape
+        output = np.zeros(samples)
+
+        for m in range(channels):
+            x[:, m], self.dc_notch_mic[m].mem = self.dc_notch_mic[m].filter_dc_notch16(x[:, m])
+
+        # overlaps-save approach, no need to use hop_size
+        frameNum = int((samples) / self.frameLen)
+
+        for n in range(frameNum):
+            x_n = x[n * self.frameLen : (n + 1) * self.frameLen, :]
+
+            x_aligned = self.time_alignment.process(x_n)
+
+            fixed_output = self.fixed_beamformer(x_aligned)
+
+            bm_output = self.blocking_matrix(x_aligned)
+
+            # AIC block
+            output_n, _ = self.aic_filter.update(bm_output, fixed_output, fir_truncate=30)
+
+            # output[n * self.frameLen : (n + 1) * self.frameLen] = fixed_output[:, 0]
+            # output[n * self.frameLen : (n + 1) * self.frameLen] = np.squeeze(bm_output[:, 0])
+            output[n * self.frameLen : (n + 1) * self.frameLen] = np.squeeze(output_n)
+
+        return output
 
     def process(self, x, angle, method=2, retH=False, retWNG=False, retDI=False):
         """

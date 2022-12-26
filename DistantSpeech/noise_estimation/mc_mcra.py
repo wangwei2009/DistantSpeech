@@ -1,6 +1,6 @@
 """
 Multi-Channel Speech Presence Probability
-==============
+================
 
 ----------
 

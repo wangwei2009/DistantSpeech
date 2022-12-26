@@ -72,7 +72,7 @@ def main(args):
     from matplotlib import pyplot as plt
     import librosa
 
-    filepath = "../../example/test_audio/rec1/"
+    filepath = "/home/wangwei/work/DistantSpeech/example/test_audio/rec1/"
     x, sr = load_wav(os.path.abspath(filepath))  # [channel,samples]
 
     sr = 16000
@@ -93,6 +93,7 @@ def main(args):
 
     D = transform.stft(x[0, :])
     Y, _ = transform.magphase(D, 2)
+    Y = np.squeeze(Y)
     print(Y.shape)
     pmesh(librosa.power_to_db(Y))
     plt.savefig('pmesh.png')

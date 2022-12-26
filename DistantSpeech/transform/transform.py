@@ -463,7 +463,7 @@ class Transform(object):
         if len(Y.shape) == 2:  # single frame
             Y = Y[:, np.newaxis, :]
         half_bin, n_frames, n_channels = Y.shape
-        assert n_channels <= self.channel
+        assert n_channels <= self.channel, 'n_channels:{} != self.channel:{}'.format(n_channels, self.channel)
         output = np.zeros((self.hop_length * n_frames, n_channels))
         for ch in range(n_channels):
             x = istft(

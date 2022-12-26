@@ -26,18 +26,48 @@ class SubbandLMS(SubbandAF):
         )
 
     def update(self, x_n, d_n, alpha=1e-4, p=None):
+        """subband LMS filter update function
+
+        Parameters
+        ----------
+        x_n : np.array
+            input signal, [samples, ]
+        d_n : np.array
+            expected signal, [samples, ]
+        alpha : _type_, optional
+            _description_, by default 1e-4
+        p : float or np.array, optional
+            update probability, float or [half_band, ], by default None
+
+        Returns
+        -------
+        err : np.array,
+            error output signal, if return time domain, [frame_len,] , else [half_band, ]
+        self.W : complex np.array
+            filter weights, [half_band, firter_len]
+        """
+
+        assert x_n.shape == d_n.shape, 'x_n and d_n must be same shape of [samples, ]'
+        assert len(x_n.shape) == 1, 'x_n must be shape of [samples, ]'
+        if p is not None:
+            if not isinstance(p, float):
+                if len(p.shape) == 2:
+                    p = p[:, 0]
+        else:
+            p = np.ones((self.half_band,))
 
         self.return_td = False
 
-        d_n = self.update_input_data(x_n, d_n, alpha=alpha, p=p)
+        d_n = self.update_input_data(x_n, d_n, alpha=alpha, p=p)  # [self.half_band, ]
 
         # error signal
-        filter_output = self.compute_filter_output(self.W, self.input_buffer)
+        filter_output = self.compute_filter_output(self.W, self.input_buffer)  # [self.half_band, ]
         if p is not None:
             assert p.shape[0] == self.half_band
             err = d_n - filter_output * p
         else:
             err = d_n - filter_output
+
         if self.norm:
             self.P = (
                 self.alpha * self.P
@@ -45,13 +75,12 @@ class SubbandLMS(SubbandAF):
             )
             grad = self.input_buffer * err[:, None].conj() / (self.P[:, None] + alpha)
         else:
-            grad = self.input_buffer * err.conj()  # LMS
+            grad = self.input_buffer * err[:, None].conj()  # LMS
 
-        self.update_coef(grad, p=p)
+        self.update_coef(grad, p=p[:, None])
 
         if self.return_td:
             err = self.transform_d.synthesis(err)
-
         return err, self.W
 
 

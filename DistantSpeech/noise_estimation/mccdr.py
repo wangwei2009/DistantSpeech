@@ -1,6 +1,6 @@
 """
 Multi-Channel Speech Presence Probability
-==============
+================
 
 ----------
 
@@ -80,13 +80,13 @@ class McCDR(McSppBase):
         c = 3
         rho = 2.5
 
-        tmp = np.power(10, c*rho/10)
+        tmp = np.power(10, c * rho / 10)
 
-        self.q_local = l_min + (l_max - l_min)*tmp/(tmp + np.power(self.Gamma), rho)
+        self.q_local = l_min + (l_max - l_min) * tmp / (tmp + np.power(self.Gamma), rho)
 
         self.mcra.estimation(np.abs(y[:, 0] * np.conj(y[:, 0])))
 
-        self.q = np.sqrt(1 - self.mcra.p/2)
+        self.q = np.sqrt(1 - self.mcra.p / 2)
         self.q = np.minimum(np.maximum(self.q, q_min), q_max)
 
         return self.q
@@ -101,7 +101,6 @@ class McCDR(McSppBase):
         self.p = 1 / (1 + self.q / (1 - self.q) * (1 + self.xi) * np.exp(-1 * (self.gamma / (1 + self.xi))))
         self.p = np.minimum(np.maximum(self.p, p_min), p_max)
 
-
     def smooth_psd(self, x, previous_x, win, alpha):
         """
         smooth spectrum in frequency and time
@@ -115,7 +114,7 @@ class McCDR(McSppBase):
 
         # smoothing in frequency
         smoothed_f = convolve(x, win)
-        smoothed_f_val = smoothed_f[int((w - 1) / 2):int(-((w - 1) / 2))]
+        smoothed_f_val = smoothed_f[int((w - 1) / 2) : int(-((w - 1) / 2))]
 
         # smoothing in time
         smoothed_x = alpha * previous_x + (1 - alpha) * smoothed_f_val
@@ -130,22 +129,29 @@ class McCDR(McSppBase):
 
         for k in range(self.half_bin):
 
-            self.Gamma[k] = np.real((self.Gamma_estimator.Fvv[k, 0, 2] - self.Gamma_estimator.Fvv_est[k, 0, 2]) /
-                                    (self.Gamma_estimator.Fvv_est[k, 0, 2]) - np.exp(-1j * np.angle(y[0, 2, k])))
+            self.Gamma[k] = np.real(
+                (self.Gamma_estimator.Fvv[k, 0, 2] - self.Gamma_estimator.Fvv_est[k, 0, 2])
+                / (self.Gamma_estimator.Fvv_est[k, 0, 2])
+                - np.exp(-1j * np.angle(y[0, 2, k]))
+            )
 
-            self.Phi_yy[:, :, k] = self.alpha * self.Phi_yy[:, :, k] + (1 - self.alpha) * (np.conj(y[k:k+1, :]).transpose() @ y[k:k+1, :])
+            self.Phi_yy[:, :, k] = self.alpha * self.Phi_yy[:, :, k] + (1 - self.alpha) * (
+                np.conj(y[k : k + 1, :]).transpose() @ y[k : k + 1, :]
+            )
 
             if self.frm_cnt < 100:
                 self.Phi_vv[:, :, k] = self.Phi_yy[:, :, k]
 
             self.Phi_xx = self.Phi_yy - self.Phi_vv
 
-            Phi_vv_inv = np.linalg.inv(self.Phi_vv[:, :, k] + np.eye(self.channels)*1e-6)
+            Phi_vv_inv = np.linalg.inv(self.Phi_vv[:, :, k] + np.eye(self.channels) * 1e-6)
 
             self.xi[k] = np.trace(Phi_vv_inv @ self.Phi_yy[:, :, k]) - self.channels
             self.xi[k] = np.maximum(self.xi[k], 1e-6)
 
-            self.gamma[k] = y[k:k+1, :] @ Phi_vv_inv @ self.Phi_xx[:, :, k] @ Phi_vv_inv @ np.conj(y[k:k+1, :]).transpose()
+            self.gamma[k] = (
+                y[k : k + 1, :] @ Phi_vv_inv @ self.Phi_xx[:, :, k] @ Phi_vv_inv @ np.conj(y[k : k + 1, :]).transpose()
+            )
 
         self.compute_q(y)
         self.compute_p(p_max=0.99, p_min=0.01)
@@ -164,8 +170,9 @@ class McCDR(McSppBase):
 
         # eq.17 in [1]
         for k in range(self.half_bin):
-            self.Phi_vv[:, :, k] = self.alpha_tilde[k] * self.Phi_vv[:, :, k] + \
-                                  beta * (1 - self.alpha_tilde[k]) * (np.conj(y[k:k+1, :]).transpose() @ y[k:k+1, :])
+            self.Phi_vv[:, :, k] = self.alpha_tilde[k] * self.Phi_vv[:, :, k] + beta * (1 - self.alpha_tilde[k]) * (
+                np.conj(y[k : k + 1, :]).transpose() @ y[k : k + 1, :]
+            )
 
 
 def main(args):
@@ -176,7 +183,7 @@ def main(args):
     import time
     from scipy.io import wavfile
 
-    filepath = "../../example/test_audio/rec1/"              # [u1,u2,u3,y]
+    filepath = "../../example/test_audio/rec1/"  # [u1,u2,u3,y]
     # filepath = "./test_audio/rec1_mcra_gsc/"     # [y,u1,u2,u3]
     x, sr = load_wav(os.path.abspath(filepath))  # [channel, samples]
     sr = 16000
@@ -196,7 +203,7 @@ def main(args):
 
     transform = Transform(n_fft=512, hop_length=256, channel=channel)
 
-    D = transform.stft(x.transpose())     # [F,T,Ch]
+    D = transform.stft(x.transpose())  # [F,T,Ch]
     Y, _ = transform.magphase(D, 2)
     print(Y.shape)
     pmesh(librosa.power_to_db(Y[:, :, -1]))
@@ -236,6 +243,7 @@ def main(args):
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="Neural Feature Extractor")
     parser.add_argument("-l", "--listen", action='store_true', help="set to listen output")  # if set true
     parser.add_argument("-s", "--save", action='store_true', help="set to save output")  # if set true

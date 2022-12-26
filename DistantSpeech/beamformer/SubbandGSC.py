@@ -1,15 +1,13 @@
 """
-overlap-save frequency domain GSC
-==================
-
-----------
-
-..    [1].Efficient frequency-domain realization of robust generalized, sidelobe cancellers.
-
+Subband GSC beamformer
+refer to
+    Robust Adaptive Beamforming Algorithm using Instantaneous Direction of Arrival 
+    with Enhanced Noise Suppression Capability. Acoustics, Speech, and Signal Processing, 1988. ICASSP-88., 1988 International Conference on. 1. I-133 . 10.1109/ICASSP.2007.366634. 
+Author:
+    Wang Wei
 """
 import argparse
 from time import time
-from turtle import update
 
 import numpy as np
 from scipy.signal import windows
@@ -19,13 +17,27 @@ from DistantSpeech.beamformer.MicArray import MicArray
 from DistantSpeech.beamformer.beamformer import beamformer
 from DistantSpeech.beamformer.utils import load_audio as audioread
 from DistantSpeech.beamformer.utils import save_audio as audiowrite
-from DistantSpeech.beamformer.utils import visual, DelaySamples
-from DistantSpeech.noise_estimation.mcspp_base import McSppBase
+from DistantSpeech.beamformer.utils import visual
 from DistantSpeech.transform.transform import Transform
 from DistantSpeech.noise_estimation import McSpp
-from DistantSpeech.transform.multirate import frac_delay, fractional_delay_filter_bank
-from DistantSpeech.adaptivefilter.feature import Emphasis, FilterDcNotch16
+from DistantSpeech.beamformer.FDGSC import FDGSC, DelayObj
+
+import librosa
+import matplotlib.pyplot as plt
+from DistantSpeech.transform.transform import Transform
+from DistantSpeech.beamformer.utils import pmesh, mesh, load_wav, save_audio, load_pcm, pt
+from DistantSpeech.beamformer.utils import load_audio as audioread
+from DistantSpeech.beamformer.utils import save_audio as audiowrite
+from DistantSpeech.beamformer.beamformer import beamformer
+from DistantSpeech.beamformer.MicArray import MicArray, compute_tau
+from DistantSpeech.noise_estimation import McSpp, McSppBase
+from DistantSpeech.transform.subband import Subband
+from DistantSpeech.adaptivefilter.SubbandLMS import SubbandLMS
+from DistantSpeech.beamformer.utils import DelaySamples, DelayFrames
 from DistantSpeech.beamformer.fixedbeamformer import TimeAlignment
+from DistantSpeech.adaptivefilter.feature import Emphasis, FilterDcNotch16
+from DistantSpeech.adaptivefilter.SubbandLmsMc import SubbandLmsMc
+from DistantSpeech.noise_estimation.omlsa_multi import NsOmlsaMulti
 
 
 class DelayObj(object):
@@ -52,7 +64,7 @@ class DelayObj(object):
         return output
 
 
-class FDGSC(beamformer):
+class SubbandGSC(beamformer):
     def __init__(
         self,
         mic_array: MicArray,
@@ -84,11 +96,17 @@ class FDGSC(beamformer):
 
         self.bm = []
         for m in range(self.M):
-            self.bm.append(FastFreqLms(filter_len=frameLen, mu=0.1, alpha=0.9, non_causal=True))
+            self.bm.append(SubbandLMS(filter_len=2, num_bands=frameLen * 2, mu=1e-1))
 
-        self.aic_filter = FastFreqLms(filter_len=frameLen, n_channels=self.M, mu=0.1, alpha=0.9, non_causal=False)
+        self.aic_filter = SubbandLmsMc(
+            filter_len=2,
+            num_bands=frameLen * 2,
+            channel=self.M,
+            mu=0.01,
+            alpha=0.8,
+        )
 
-        self.delay_fbf = DelaySamples(self.frameLen, int(frameLen / 2))
+        self.delay_fbf = DelaySamples(self.frameLen, int(frameLen))
 
         self.delay_obj_bm = DelayObj(self.frameLen, 40, channel=self.M)
 
@@ -97,9 +115,18 @@ class FDGSC(beamformer):
         self.transform = Transform(n_fft=frameLen * 2, hop_length=frameLen, channel=self.M)
         self.spp.mcra.L = 10
 
+        self.transform_fixed = Transform(n_fft=frameLen * 2, hop_length=frameLen, channel=1)
+
         self.dc_notch_mic = []
         for _ in range(self.M):
             self.dc_notch_mic.append(FilterDcNotch16(radius=0.98))
+
+        self.bm_output_n = np.zeros((self.frameLen, self.M))
+        self.W_aic = np.zeros((self.bm[0].half_band, 2, self.M), dtype=complex)
+
+        self.omlsa_multi = NsOmlsaMulti(nfft=frameLen * 2, cal_weights=True, M=self.M)
+        self.transform_fbf = Transform(n_fft=frameLen * 2, hop_length=frameLen, channel=1)
+        self.transform_bm = Transform(n_fft=frameLen * 2, hop_length=frameLen, channel=self.M)
 
     def fixed_delay(self):
         pass
@@ -140,12 +167,15 @@ class FDGSC(beamformer):
         """
         pass
 
-    def process(self, x):
+    def process(self, x, postfilter=False):
         """
         process core function
         :param x: input time signal, (n_chs, n_samples)
         :return: enhanced signal, (n_samples,)
         """
+
+        for m in range(self.M):
+            x[m, :], self.dc_notch_mic[m].mem = self.dc_notch_mic[m].filter_dc_notch16(x[m, :])
 
         output = np.zeros(x.shape[1])
 
@@ -154,23 +184,28 @@ class FDGSC(beamformer):
 
         # adaptive block matrix path
         bm_output = np.zeros((x.shape[1], self.M))
+        aligned_output = np.zeros((x.shape[1], self.M))
         fix_output = np.zeros((x.shape[1],))
+        aic_output = np.zeros((x.shape[1],))
 
         # overlaps-save approach, no need to use hop_size
         frameNum = int((x.shape[1]) / self.frameLen)
 
         p = np.zeros((self.spp.half_bin, frameNum))
+        G = np.zeros((self.spp.half_bin, frameNum))
 
+        t = 0
         for n in range(frameNum):
             x_n = x[:, n * self.frameLen : (n + 1) * self.frameLen]
 
             x_aligned = self.time_alignment.process(x_n.T)
+            aligned_output[n * self.frameLen : (n + 1) * self.frameLen, :] = x_aligned
 
             D = self.transform.stft(x_aligned)
 
             fixed_output = self.fixed_beamformer(x_aligned)
 
-            p[:, n] = self.spp.estimation(D[:, 0, :], diag_value=1e-2)
+            p[:, n] = self.spp.estimation(D[:, 0, :])
             # p[:, n] = np.sqrt(p[:, n])
             # p[:, n] = p[:, n] ** 2
 
@@ -180,12 +215,14 @@ class FDGSC(beamformer):
             # adaptive block matrix
             # x_n = self.delay_obj_bm.delay(x_n)
             for m in range(self.M):
-                bm_output_n, _ = self.bm[m].update(
-                    fixed_output, x_n[m, :], p=p[:, n : n + 1], fir_truncate=30, filter_p=True, update=True
+                self.bm_output_n[:, m], _ = self.bm[m].update(
+                    fixed_output[:, 0],
+                    x_aligned[:, m],
+                    p=p[:, n : n + 1],
                 )
-                bm_output[n * self.frameLen : (n + 1) * self.frameLen, m] = np.squeeze(bm_output_n)
+                bm_output[n * self.frameLen : (n + 1) * self.frameLen, m] = np.squeeze(self.bm_output_n[:, m])
 
-            # # # fix delay
+            # # # # fix delay
             fixed_output = self.delay_fbf.delay(fixed_output)
             # fixed_output = fixed_output.T
 
@@ -194,28 +231,46 @@ class FDGSC(beamformer):
                 bm_output[n * self.frameLen : (n + 1) * self.frameLen, :],
                 fixed_output,
                 p=1 - p[:, n : n + 1],
-                fir_truncate=30,
             )
 
-            # output[n * self.frameLen : (n + 1) * self.frameLen] = bm_d[0, :]
+            if postfilter:
+                Y = self.transform_fbf.stft(output_n)
+                U = self.transform_bm.stft(bm_output)
+
+                self.omlsa_multi.estimation(
+                    np.real(Y[:, 0, 0] * np.conj(Y[:, 0, 0])), np.real(U[:, 0, :] * np.conj(U[:, 0, :]))
+                )
+
+                # post-filter
+                # G[:, t] = np.sqrt(self.omlsa_multi.G)
+                G[:, t] = np.sqrt(self.omlsa_multi.xi_hat)
+                t += 1
+                Y[:, 0, 0] = Y[:, 0, 0] * np.sqrt(self.omlsa_multi.G)
+                # output_n = self.transform_fbf.istft(Y)
+
             # output[n * self.frameLen : (n + 1) * self.frameLen] = fixed_output[:, 0]
+            # output[n * self.frameLen : (n + 1) * self.frameLen] = np.squeeze(bm_output[:, 0])
+            output[n * self.frameLen : (n + 1) * self.frameLen] = np.squeeze(output_n)
+
+            # output[n * self.frameLen : (n + 1) * self.frameLen] = bm_d[0, :]
+            fix_output[n * self.frameLen : (n + 1) * self.frameLen] = fixed_output[:, 0]
             output[n * self.frameLen : (n + 1) * self.frameLen] = np.squeeze(output_n)
             # output[n * self.frameLen : (n + 1) * self.frameLen] = bm_output[
             #     n * self.frameLen : (n + 1) * self.frameLen, 0
             # ]
 
-        return output, p
+        return output, fix_output, bm_output, p, aligned_output
 
 
 def main(args):
 
-    frameLen = 1024
+    frameLen = 512
     hop = frameLen / 2
     overlap = frameLen - hop
     nfft = 256
     r = 0.032
     fs = 16000
-    M = 4
+    M = 6
 
     # start = tim
 
@@ -225,9 +280,9 @@ def main(args):
     x = np.random.randn(M, 16000 * 5)
     start = time()
 
-    fdgsc = FDGSC(MicArrayObj, frameLen, angle)
+    gsc = SubbandGSC(MicArrayObj, frameLen, angle)
 
-    yout, _ = fdgsc.process(x)
+    yout, _ = gsc.process(x)
 
     print(yout.shape)
 
@@ -237,33 +292,6 @@ def main(args):
     print(end - start)
 
     visual(x[0, :], yout)
-
-    return
-
-
-def test_delay():
-    from matplotlib import pyplot as plt
-
-    t = np.arange(8000) / 1000.0
-    f = 1000
-    fs = 1000
-    x = np.sin(2 * np.pi * f / fs * t)
-
-    delay = 128
-    buffer_len = 512
-    delay_fbf = DelayObj(buffer_len, delay)
-
-    n_frame = int(len(x) / buffer_len)
-
-    output = np.zeros(len(x))
-
-    for n in range(n_frame):
-        output[n * buffer_len : (n + 1) * buffer_len] = delay_fbf.delay(x[n * buffer_len : (n + 1) * buffer_len])
-
-    plt.figure()
-    plt.plot(x)
-    plt.plot(np.squeeze(output))
-    plt.show()
 
 
 if __name__ == "__main__":

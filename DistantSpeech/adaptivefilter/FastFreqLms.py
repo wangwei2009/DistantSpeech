@@ -18,6 +18,7 @@ from tqdm import tqdm
 from DistantSpeech.adaptivefilter.BaseFilter import BaseFilter, awgn
 from DistantSpeech.adaptivefilter.BlockLMS import BlockLms
 from DistantSpeech.beamformer.utils import load_audio, DelaySamples
+from DistantSpeech.transform.transform import Transform
 
 
 class DelayObj(object):
@@ -45,7 +46,9 @@ class DelayObj(object):
 
 
 class FastFreqLms(BaseFilter):
-    def __init__(self, filter_len=128, mu=0.01, constrain=True, n_channels=1, alpha=0.9, non_causal=False):
+    def __init__(
+        self, filter_len=128, mu=0.01, constrain=True, n_channels=1, alpha=0.9, non_causal=False, two_path=False
+    ):
         BaseFilter.__init__(self, filter_len=filter_len, mu=mu)
         self.n_channels = n_channels
         self.input_buffer = np.zeros((filter_len * 2, n_channels))  # to store [old, new]
@@ -65,6 +68,30 @@ class FastFreqLms(BaseFilter):
         if non_causal:
             self.delay_samples = DelaySamples(self.filter_len, int(self.filter_len / 2))
 
+        self.window = 0.5 - 0.5 * np.cos(2 * np.pi * (np.linspace(0, self.n_fft - 1, num=self.n_fft)) / self.n_fft)
+        self.window = self.window[:, np.newaxis]
+
+        self.two_path = two_path
+        if self.two_path:
+            self.foreground = np.fft.rfft(self.w_pad, axis=0)
+
+        self.e_pre = np.zeros((self.filter_len, 1))
+
+        self.tranform_y = Transform(n_fft=self.filter_len * 2, hop_length=self.filter_len, channel=1)
+
+        # self.p = np.zeros((self.n_fft // 2 + 1, 1))
+        self.p = 0.5
+
+    def transfer_logic(self, e_f, e_b, y_f, y_b):
+        # # transfer logic
+        if 10 * np.log10(np.sum(np.abs(e_f)) / (np.sum(np.abs(e_b)) + 1e-6) + 1e-6) > 3:
+            self.foreground[:] = self.W
+            # y_f = y_b.copy()
+            # % Apply a smooth transition so as to not introduce blocking artifacts */
+            y_f = self.window[self.filter_len :] * y_f + self.window[: self.filter_len] * y_b
+
+        return e_f, e_b, y_f, y_b
+
     def set_weights(self, weights):
         weights = np.squeeze(weights)
         assert len(weights) == self.filter_len
@@ -80,13 +107,15 @@ class FastFreqLms(BaseFilter):
         """
         if xt_vec.ndim == 1:
             xt_vec = xt_vec[:, np.newaxis]
-        assert self.n_channels == xt_vec.shape[1]
+        assert self.n_channels == xt_vec.shape[1], 'n_channels:{} != xt_vec.shape[1]:{}'.format(
+            self.n_channels, xt_vec.shape[1]
+        )
         self.input_buffer[: self.filter_len, :] = self.input_buffer[self.filter_len :, :]  # old
         self.input_buffer[self.filter_len :, :] = xt_vec  # new
 
         return self.input_buffer
 
-    def update(self, x_n_vec, d_n_vec, update=True, p=1.0, fir_truncate=None):
+    def update(self, x_n_vec, d_n_vec, update=True, p=1.0, fir_truncate=None, filter_p=False):
         """fast frequency lms update function
 
         Parameters
@@ -113,11 +142,16 @@ class FastFreqLms(BaseFilter):
         X = np.fft.rfft(self.input_buffer, n=self.n_fft, axis=0)
         self.P = self.alpha * self.P + (1 - self.alpha) * np.sum(np.real((X.conj() * X)), axis=1, keepdims=True)
 
+        # p_mean = np.mean(p[24:128], axis=0)
         # save only the last half frame to avoid circular convolution effects
         y = np.fft.irfft(X * self.W, axis=0)[-self.filter_len :, :]
 
         # summation of multichannel signal
         y = np.sum(y, axis=1, keepdims=True)
+
+        if self.two_path:
+            y_f = np.fft.irfft(X * self.foreground, axis=0)[-self.filter_len :, :]
+            y_f = np.sum(y_f, axis=1, keepdims=True)
 
         # use causal filter to estimate non-causal system will introduce a delay(filter_len/2) compare to expected signal
         if self.non_causal:
@@ -126,6 +160,11 @@ class FastFreqLms(BaseFilter):
         if d_n_vec.ndim == 1:
             d_n_vec = d_n_vec[:, np.newaxis]
         e = d_n_vec - y
+
+        if self.two_path:
+            e_f = d_n_vec - y_f
+            e_f, e_b, y, y_b = self.transfer_logic(e_f, e, y_f, y)
+            e = d_n_vec - y
 
         e_pad = np.concatenate((np.zeros((self.filter_len, 1)), e), axis=0)
 
@@ -160,7 +199,7 @@ def test_aic():
     :return:
     """
 
-    data = load_audio('wav/cleanspeech_reverb_ch3_rt60_110.wav')
+    data = load_audio('DistantSpeech/adaptivefilter/wav/cleanspeech_reverb_ch3_rt60_110.wav')
     x = data[:, 0]  # to estimate rtf
     # x = load_audio('cleanspeech.wav')     # to estimate atf
     x = np.mean(data, axis=1)

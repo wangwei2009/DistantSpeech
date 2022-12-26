@@ -18,7 +18,9 @@ def sph2cart(azimuth, elevation, r):
 
 
 class MicArray(object):
-    def __init__(self, arrayType='circular', r=0.032, c=343, M=4, n_fft=256):
+    def __init__(
+        self, arrayType='circular', r=0.032, c=343, M=4, n_fft=256, energy_absorption=0.7, room_size=[5.0, 3.0, 3.0]
+    ):
         self.arrayType = arrayType
         self.c = c
         self.r = r
@@ -35,7 +37,8 @@ class MicArray(object):
         self.array_type = arrayType
         self.mic_loc = np.zeros((M, 3))
         self.mic_loc = self.array_init()
-        self.array_sim = ArraySim(coordinate=self.mic_loc)
+        # self.array_sim = ArraySim(coordinate=self.mic_loc)
+        self.array_sim = ArraySim(coordinate=self.mic_loc, energy_absorption=energy_absorption, room_size=room_size)
 
         """
         # %                   ^ +z
@@ -78,7 +81,7 @@ class MicArray(object):
 
         Returns
         -------
-        np.array, [M, bin]
+        np.array, [bin, M]
             steer vector
         """
         # omega = 2 * np.pi * self.freq_bin * self.fs / self.n_fft
@@ -120,7 +123,7 @@ class MicArray(object):
         """
         az = incident_angle[0]
         el = incident_angle[1] if len(incident_angle.shape) > 0 else 0
-        x0, y0, z0 = sph2cart(az, el, 1)
+        x0, y0, z0 = sph2cart(az, el, 10)
 
         p0 = -1 * np.array([x0, y0, z0])  # unit-vector for impinging signal
         p0 = p0[:, np.newaxis]

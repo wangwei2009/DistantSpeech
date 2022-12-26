@@ -1,6 +1,56 @@
 import numpy as np
 
 
+def fractional_delay_filter_bank(delays):
+    """
+    Creates a fractional delay filter bank of windowed sinc filters
+
+    Parameters
+    ----------
+    delays: 1d narray
+        The delays corresponding to each filter in fractional samples
+
+    Returns
+    -------
+    numpy array
+        [filter_len, chs]
+        An ndarray where the ith col contains the fractional delay filter
+        corresponding to the ith delay. The number of columns of the matrix
+        is proportional to the maximum delay.
+    """
+
+    delays = np.array(delays)
+
+    # subtract the minimum delay, so that all delays are positive
+    delays -= delays.min()
+
+    # constants and lengths
+    N = delays.shape[0]
+    L = 81
+    filter_length = L + int(np.ceil(delays).max())
+
+    # allocate a flat array for the filter bank that we'll reshape at the end
+    bank_flat = np.zeros(N * filter_length)
+
+    # separate delays in integer and fractional parts
+    di = np.floor(delays).astype(np.int64)
+    df = delays - di
+
+    # broadcasting tricks to compute at once all the locations
+    # and sinc times that must be computed
+    T = np.arange(L)
+    indices = T[None, :] + (di[:, None] + filter_length * np.arange(N)[:, None])
+    sinc_times = T - df[:, None] - (L - 1) / 2
+
+    # we'll need to window also all the sincs at once
+    windows = np.tile(np.hanning(L), N)
+
+    # compute all sinc with one call
+    bank_flat[indices.ravel()] = windows * np.sinc(sinc_times.ravel())
+
+    return np.reshape(bank_flat, (N, -1)).T
+
+
 def frac_delay(delta, N, w_max=0.9, C=4):
     """
     Compute optimal fractionnal delay filter according to
@@ -29,23 +79,17 @@ def frac_delay(delta, N, w_max=0.9, C=4):
     try:
         from cvxopt import solvers, matrix
     except:
-        raise ValueError(
-            "To use the frac_delay function, the cvxopt module is necessary."
-        )
+        raise ValueError("To use the frac_delay function, the cvxopt module is necessary.")
 
     f = np.concatenate((np.zeros(N), np.ones(1)))
 
     A = []
     b = []
     for i in range(N_C):
-        Anp = np.concatenate(
-            ([np.cos(w[i] * n), -np.sin(w[i] * n)], [[0], [0]]), axis=1
-        )
+        Anp = np.concatenate(([np.cos(w[i] * n), -np.sin(w[i] * n)], [[0], [0]]), axis=1)
         Anp = np.concatenate(([-f], Anp), axis=0)
         A.append(matrix(Anp))
-        b.append(
-            matrix(np.concatenate(([0], np.cos(w[i] * delta), -np.sin(w[i] * delta))))
-        )
+        b.append(matrix(np.concatenate(([0], np.cos(w[i] * delta), -np.sin(w[i] * delta)))))
 
     solvers.options["show_progress"] = False
     sol = solvers.socp(matrix(f), Gq=A, hq=b)
@@ -128,12 +172,13 @@ def resample(x, p, q):
 
     return x_ds
 
+
 if __name__ == "__main__":
 
     delta = 2.5
     N = 128
-    w_max=0.9
-    C=4
+    w_max = 0.9
+    C = 4
 
     # constraints
     N_C = int(C * N)
@@ -144,23 +189,17 @@ if __name__ == "__main__":
     try:
         from cvxopt import solvers, matrix
     except:
-        raise ValueError(
-            "To use the frac_delay function, the cvxopt module is necessary."
-        )
+        raise ValueError("To use the frac_delay function, the cvxopt module is necessary.")
 
     f = np.concatenate((np.zeros(N), np.ones(1)))
 
     A = []
     b = []
     for i in range(N_C):
-        Anp = np.concatenate(
-            ([np.cos(w[i] * n), -np.sin(w[i] * n)], [[0], [0]]), axis=1
-        )
+        Anp = np.concatenate(([np.cos(w[i] * n), -np.sin(w[i] * n)], [[0], [0]]), axis=1)
         Anp = np.concatenate(([-f], Anp), axis=0)
         A.append(matrix(Anp))
-        b.append(
-            matrix(np.concatenate(([0], np.cos(w[i] * delta), -np.sin(w[i] * delta))))
-        )
+        b.append(matrix(np.concatenate(([0], np.cos(w[i] * delta), -np.sin(w[i] * delta)))))
 
     solvers.options["show_progress"] = False
     sol = solvers.socp(matrix(f), Gq=A, hq=b)
@@ -168,13 +207,14 @@ if __name__ == "__main__":
     h = np.array(sol["x"])[:-1, 0]
 
     import matplotlib.pyplot as plt
-    w = np.linspace(0, np.pi, 2*N_C)
-    F = np.exp(-1j*w[:,np.newaxis]*n)
-    Hd = np.exp(-1j*delta*w)
+
+    w = np.linspace(0, np.pi, 2 * N_C)
+    F = np.exp(-1j * w[:, np.newaxis] * n)
+    Hd = np.exp(-1j * delta * w)
     plt.figure()
-    plt.subplot(3,1,1)
-    plt.plot(np.abs(np.dot(F,h) - Hd))
-    plt.subplot(3,1,2)
-    plt.plot(np.diff(np.angle(np.dot(F,h))))
-    plt.subplot(3,1,3)
+    plt.subplot(3, 1, 1)
+    plt.plot(np.abs(np.dot(F, h) - Hd))
+    plt.subplot(3, 1, 2)
+    plt.plot(np.diff(np.angle(np.dot(F, h))))
+    plt.subplot(3, 1, 3)
     plt.plot(h)

@@ -4,6 +4,8 @@ import pyroomacoustics as pra
 from DistantSpeech.beamformer.utils import save_audio as audiowrite
 from DistantSpeech.beamformer.utils import load_audio as audioread
 
+import gpuRIR
+
 
 def unit_vec3D(phi):
     return np.array([[np.cos(phi), np.sin(phi), 0]]).T
@@ -89,6 +91,53 @@ def sph2cart(azimuth, elevation, r):
     return [x, y, z]
 
 
+def generate_rir(
+    room_sz=[3, 3, 2.5],
+    pos_src=np.array([[1, 2.9, 0.5], [1, 2, 0.5]]),
+    pos_rcv=np.array([[0.5, 1, 0.5], [1, 1, 0.5], [1.5, 1, 0.5]]),
+    T60=1.0,
+):
+    """use gpuRIR to generate RIRs
+
+    Parameters
+    ----------
+    room_sz : list, optional
+        Size of the room [m], by default [3, 3, 2.5]
+    pos_src : np.array, optional
+        Positions of the sources [m], [num_src, 3], by default np.array([[1, 2.9, 0.5], [1, 2, 0.5]])
+    pos_rcv : np.array, optional
+        Position of the receivers [m], [num_rcv, 3], by default np.array([[0.5, 1, 0.5], [1, 1, 0.5], [1.5, 1, 0.5]])
+    T60 : float, optional
+        Time for the RIR to reach 60dB of attenuation [s], by default 1.0
+
+    Returns
+    -------
+    RIRs : np.array
+        3D ndarray The first axis is the source, the second the receiver and the third the time, [num_src, num_rcv, samples]
+    """
+
+    nb_src = pos_src.shape[0]  # Number of sources
+    nb_rcv = pos_rcv.shape[0]  # Number of receivers
+
+    # orV_rcv = np.matlib.repmat(np.array([0,1,0]), nb_rcv, 1) # Vectors pointing in the same direction than the receivers
+    mic_pattern = "omni"  # Receiver polar pattern
+    abs_weights = [0.9] * 5 + [0.5]  # Absortion coefficient ratios of the walls
+    # T60 = 0.8	 # Time for the RIR to reach 60dB of attenuation [s]
+    att_diff = 15.0  # Attenuation when start using the diffuse reverberation model [dB]
+    att_max = 60.0  # Attenuation at the end of the simulation [dB]
+    fs = 16000.0  # Sampling frequency [Hz]
+
+    beta = gpuRIR.beta_SabineEstimation(room_sz, T60, abs_weights=abs_weights)  # Reflection coefficients
+    Tdiff = gpuRIR.att2t_SabineEstimator(att_diff, T60)  # Time to start the diffuse reverberation model [s]
+    Tmax = gpuRIR.att2t_SabineEstimator(att_max, T60)  # Time to stop the simulation [s]
+    nb_img = gpuRIR.t2n(Tdiff, room_sz)  # Number of image sources in each dimension
+    RIRs = gpuRIR.simulateRIR(room_sz, beta, pos_src, pos_rcv, nb_img, Tmax, fs, Tdiff=Tdiff, mic_pattern=mic_pattern)
+
+    t = np.arange(int(np.ceil(Tmax * fs))) / fs
+
+    return RIRs, t
+
+
 def callback_mix(premix, snr=0, sir=0, ref_mic=0, n_src=None, n_tgt=None):
 
     # first normalize all separate recording to have unit power at microphone one
@@ -96,8 +145,9 @@ def callback_mix(premix, snr=0, sir=0, ref_mic=0, n_src=None, n_tgt=None):
     premix /= p_mic_ref[:, None, None]
 
     # now compute the power of interference signal needed to achieve desired SIR
-    sigma_i = np.sqrt(10 ** (-sir / 10) / (n_src - n_tgt))
-    premix[n_tgt:n_src, :, :] *= sigma_i
+    if n_src > n_tgt:
+        sigma_i = np.sqrt(10 ** (-sir / 10) / (n_src - n_tgt))
+        premix[n_tgt:n_src, :, :] *= sigma_i
 
     max_value = np.max(np.abs(premix))
 
@@ -114,10 +164,27 @@ def callback_mix(premix, snr=0, sir=0, ref_mic=0, n_src=None, n_tgt=None):
 
 
 class ArraySim(object):
-    def __init__(self, array_type="linear", M=3, spacing=0.032, coordinate=None, fs=16000, energy_absorption=0.7):
+    def __init__(
+        self,
+        array_type="linear",
+        M=3,
+        spacing=0.032,
+        coordinate=None,
+        fs=16000,
+        energy_absorption=0.7,
+        room_size=[5.0, 3.0, 3.0],
+        anechoic=False,
+    ):
         assert array_type in ["linear", "circular", "arbitrary"]
 
+        self.room_size = room_size
+
         self.corners = np.array([[0, 0], [0, 3], [5, 3], [5, 0]]).T  # [x,y]
+        if room_size is not None:
+            self.corners[0, 2] = room_size[0]
+            self.corners[0, 3] = room_size[0]
+            self.corners[1, 1] = room_size[1]
+            self.corners[1, 2] = room_size[1]
 
         self.height = 3.0
 
@@ -134,19 +201,22 @@ class ArraySim(object):
             if array_type == 'circular':
                 self.R = circular_3d_array(self.center_loc, M, 0, spacing)
 
-        # set max_order to a low value for a quick (but less accurate) RIR
-        self.room = pra.Room.from_corners(
-            self.corners,
-            fs=fs,
-            max_order=3,
-            materials=pra.Material(energy_absorption, 0.15),
-            ray_tracing=True,
-            air_absorption=True,
-        )
-        self.room.extrude(self.height, materials=pra.Material(0.7, 0.15))
+        if anechoic:
+            self.room = pra.AnechoicRoom(fs=fs)
+        else:
+            # set max_order to a low value for a quick (but less accurate) RIR
+            self.room = pra.Room.from_corners(
+                self.corners,
+                fs=fs,
+                max_order=3,
+                materials=pra.Material(energy_absorption, 0.15),
+                ray_tracing=True,
+                air_absorption=True,
+            )
+            self.room.extrude(self.height, materials=pra.Material(0.7, 0.15))
 
-        # Set the ray tracing parameters
-        self.room.set_ray_tracing(receiver_radius=0.1, n_rays=10000, energy_thres=1e-5)
+            # Set the ray tracing parameters
+            self.room.set_ray_tracing(receiver_radius=0.1, n_rays=10000, energy_thres=1e-5)
 
         # add 3-microphone array
         self.room.add_microphone(self.R)
@@ -176,7 +246,11 @@ class ArraySim(object):
         snr=30,
         sir=15,
         return_premix=True,
+        backend='pyroomacoustic',
+        verbose=False,
     ):
+        assert backend in ['pyroomacoustic', 'gpuRIR']
+
         if interference is not None:
             interf = interference
         else:
@@ -192,12 +266,20 @@ class ArraySim(object):
         interf_location = sph2cart(interf_angle * np.pi / 180, 0, interf_distance)
         interf_location += self.center_loc
 
+        if verbose:
+            print('source_location:{}'.format(source_location))
+            print('interf_location:{}'.format(interf_location))
+            print('center_loc:{}'.format(self.center_loc))
+            print('source_location_real:{}'.format(source_location))
+            print('interf_location_real:{}'.format(interf_location))
+
         # add source and set the signal to WAV file content
         self.room.add_source(source_location, signal=source_signal)
-        self.room.add_source(interf_location, signal=interf)
+        if interference is not None:
+            self.room.add_source(interf_location, signal=interf)
 
         # compute image sources
-        self.room.image_source_model()
+        self.room.image_source_model()  # [num_mic, num_src, samples]
 
         # print(self.room.rir.shape)
 
@@ -208,14 +290,38 @@ class ArraySim(object):
         # fig.set_size_inches(20, 10)
         # plt.show()
 
-        # the extra arguments are given in a dictionary
-        callback_mix_kwargs = {
-            'snr': snr,  # SNR target is 30 decibels
-            'sir': sir,  # SIR target is 10 decibels
-            'n_src': 2,
-            'n_tgt': 1,
-            'ref_mic': 0,
-        }
+        if interference is not None:
+            # the extra arguments are given in a dictionary
+            callback_mix_kwargs = {
+                'snr': snr,  # SNR target is 30 decibels
+                'sir': sir,  # SIR target is 10 decibels
+                'n_src': 2,
+                'n_tgt': 1,
+                'ref_mic': 0,
+            }
+        else:
+            # the extra arguments are given in a dictionary
+            callback_mix_kwargs = {
+                'snr': snr,  # SNR target is 30 decibels
+                'n_src': 1,
+                'n_tgt': 1,
+                'ref_mic': 0,
+            }
+        if backend == 'gpuRIR':
+            sources_pos = []
+            for source in range(len(np.array(self.room.sources))):
+                sources_pos.append(self.room.sources[source].position)
+
+            RIRs, _ = generate_rir(self.room_size, np.array(sources_pos), self.R.T, T60=t60)
+            print('RIRs:{}'.format(RIRs.shape))
+            min_len = np.minimum(self.room.rir[0][0].shape[0], RIRs[0][0].shape[0])
+            for source in range(callback_mix_kwargs['n_src']):
+                for mic in range(self.R.shape[1]):
+                    min_len = np.minimum(self.room.rir[mic][source].shape[0], RIRs[source][mic].shape[0])
+                    self.room.rir[mic][source][:min_len] = RIRs[source][mic][:min_len]
+                    # self.room.rir[mic][source][RIRs[source][mic].shape[0] :] = 0
+                    # self.room.rir[mic][source][200:] = 0
+
         # callback_mix_kwargs = Callback_mix_kwargs(snr=snr, sir=sir)
         premix = self.room.simulate(
             callback_mix=callback_mix, callback_mix_kwargs=callback_mix_kwargs, return_premix=return_premix
