@@ -1,0 +1,162 @@
+import threading
+import wave
+
+import pyaudio
+import numpy as np
+import threading
+import wave
+
+import numpy as np
+import pyaudio
+
+from DistantSpeech.beamformer.fixedbeamformer import FixedBeamformer
+
+
+class realtime_processing(object):
+    def __init__(
+        self,
+        EnhancementMehtod=FixedBeamformer,
+        angle=0,
+        chunk=1024,
+        channels=6,
+        rate=16000,
+        Recording=False,
+        duplex=False,
+        save_rec_to_file=False,
+    ):
+        self.CHUNK = chunk
+        self.FORMAT = pyaudio.paInt16
+        self.CHANNELS = channels
+        self.RATE = rate
+        self._running = True
+        self._frames = []
+        self.input_device_index = 0
+        self.method = 0
+        self.EnhancementMethod = EnhancementMehtod
+        self.angle = angle
+        self.isRecording = Recording
+        self.save_rec_to_file = save_rec_to_file
+        if self.save_rec_to_file:
+            self.wf = wave.open('output.wav', 'wb')
+            self.wf.setnchannels(6)
+            self.wf.setsampwidth(2)
+            self.wf.setframerate(self.RATE)
+        self.duplex = duplex
+
+        self.p = pyaudio.PyAudio()
+        input_device = self.get_audio_input_devices()
+        # print(input_device)
+
+    def audioDevice(self):
+        pass
+
+    def get_audio_devices(self):
+        p = pyaudio.PyAudio()
+        devices = []
+        for i in range(p.get_device_count()):
+            # print(p.get_device_info_by_index(i).get('name'))
+            devices.append(p.get_device_info_by_index(i))
+        return devices
+
+    def get_audio_input_devices(self):
+        devices = []
+        for item in self.get_audio_devices():
+            if item.get('maxInputChannels') > 4:
+                devices.append(item)
+        return devices
+
+    def get_audio_output_devices(self):
+        devices = []
+        for item in self.get_audio_devices():
+            if item.get('maxOutputChannels') > 0:
+                devices.append(item)
+        return devices
+
+    def start(self):
+        if self.isRecording:
+            print('Recording...\n')
+        threading._start_new_thread(self.__recording, ())
+
+    def recording(self):
+        self._running = True
+        self._frames = []
+
+        if self.duplex:
+            streamOut = self.p.open(
+                format=self.FORMAT,
+                channels=1,
+                rate=self.RATE,
+                input=False,
+                output=True,
+                # output_device_index=4,
+                frames_per_buffer=self.CHUNK,
+            )
+
+        stream = self.p.open(
+            format=self.FORMAT,
+            channels=self.CHANNELS,
+            rate=self.RATE,
+            input=True,
+            output=False,
+            # output_device_index=4,
+            frames_per_buffer=self.CHUNK,
+        )
+
+        while self._running:
+            self._frames = []
+            data = stream.read(self.CHUNK)
+            MultiChannelData = np.zeros((self.CHUNK, 6), dtype=float)
+            if self.CHANNELS == 6:
+
+                samps = np.fromstring(data, dtype='<i2').astype(np.float32, order='C') / 32768.0
+                # start = time.clock()
+                MultiChannelData = np.reshape(samps, (self.CHUNK, 6))
+
+                # yout = self.EnhancementMethod.process(MultiChannelData[:, 1:5].T, self.angle, self.method)
+                # MultiChannelData[:, 5] = yout['data']
+                data = (MultiChannelData[:, 5] * 32768).astype('<i2').tobytes()
+                # end = time.clock()
+                # print(end - start, '\n')
+                if self.save_rec_to_file:
+                    MultiChannelPCM = (MultiChannelData * 32768).astype('<i2').tobytes()
+                    self._frames.append(MultiChannelPCM)
+                    self.wf.writeframes(b''.join(self._frames))
+
+            if self.duplex:
+                streamOut.write(data, self.CHUNK)  # play back audio stream
+
+        stream.stop_stream()
+        stream.close()
+        if self.duplex:
+            streamOut.stop_stream()
+            streamOut.close()
+
+        if self.save_rec_to_file:
+            self.wf.close()
+
+        self.p.terminate()
+
+    def stop(self):
+        self._running = False
+
+    def changeAlgorithm(self, index):
+        self.method = index
+
+    def save(self, filename):
+
+        p = pyaudio.PyAudio()
+        if not filename.endswith(".wav"):
+            filename = filename + ".wav"
+        wf = wave.open(filename, 'wb')
+        wf.setnchannels(6)
+        wf.setsampwidth(p.get_sample_size(self.FORMAT))
+        wf.setframerate(self.RATE)
+        wf.writeframes(b''.join(self._frames))
+        wf.close()
+        print("Saved")
+
+
+if __name__ == "__main__":
+
+    ptr = realtime_processing(Recording=True, save_rec_to_file=True)
+    ptr.recording()
