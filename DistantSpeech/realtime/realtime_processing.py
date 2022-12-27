@@ -15,7 +15,7 @@ from DistantSpeech.beamformer.fixedbeamformer import FixedBeamformer
 class realtime_processing(object):
     def __init__(
         self,
-        EnhancementMehtod=FixedBeamformer,
+        EnhancementMehtod=None,
         angle=0,
         chunk=1024,
         channels=6,
@@ -77,6 +77,10 @@ class realtime_processing(object):
             print('Recording...\n')
         threading._start_new_thread(self.__recording, ())
 
+    def process(self, data):
+
+        return data[:, 1]
+
     def recording(self):
         self._running = True
         self._frames = []
@@ -101,19 +105,20 @@ class realtime_processing(object):
             # output_device_index=4,
             frames_per_buffer=self.CHUNK,
         )
-
+        print('Recording...\n')
         while self._running:
             self._frames = []
             data = stream.read(self.CHUNK)
             MultiChannelData = np.zeros((self.CHUNK, 6), dtype=float)
             if self.CHANNELS == 6:
 
-                samps = np.fromstring(data, dtype='<i2').astype(np.float32, order='C') / 32768.0
+                samps = np.frombuffer(data, dtype='<i2').astype(np.float32, order='C') / 32768.0
                 # start = time.clock()
                 MultiChannelData = np.reshape(samps, (self.CHUNK, 6))
 
                 # yout = self.EnhancementMethod.process(MultiChannelData[:, 1:5].T, self.angle, self.method)
                 # MultiChannelData[:, 5] = yout['data']
+                MultiChannelData[:, 5] = self.process(MultiChannelData[:, 1:5])
                 data = (MultiChannelData[:, 5] * 32768).astype('<i2').tobytes()
                 # end = time.clock()
                 # print(end - start, '\n')
