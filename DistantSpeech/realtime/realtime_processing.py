@@ -99,38 +99,42 @@ class realtime_processing(object):
             frames_per_buffer=self.CHUNK,
         )
         print('Recording...\n')
-        while self._running:
-            self._frames = []
-            data = stream.read(self.CHUNK)
-            if self.CHANNELS == 6:
 
-                samps = np.frombuffer(data, dtype='<i2').astype(np.float32, order='C') / 32768.0
-                # start = time.clock()
-                MultiChannelData = np.reshape(samps, (self.CHUNK, 6))
+        try:
+            while self._running:
+                self._frames = []
+                data = stream.read(self.CHUNK)
+                if self.CHANNELS == 6:
 
-                MultiChannelData[:, 5] = self.process(MultiChannelData[:, 1:5])
-                # end = time.clock()
-                # print(end - start, '\n')
-                if self.save_rec_to_file:
-                    MultiChannelPCM = (MultiChannelData * 32768).astype('<i2').tobytes()
-                    self._frames.append(MultiChannelPCM)
-                    self.wf.writeframes(b''.join(self._frames))
-                else:
-                    data = (MultiChannelData[:, 5] * 32768).astype('<i2').tobytes()
+                    samps = np.frombuffer(data, dtype='<i2').astype(np.float32, order='C') / 32768.0
+                    # start = time.clock()
+                    MultiChannelData = np.reshape(samps, (self.CHUNK, 6))
 
+                    MultiChannelData[:, 5] = self.process(MultiChannelData[:, 1:5])
+                    # end = time.clock()
+                    # print(end - start, '\n')
+                    if self.save_rec_to_file:
+                        MultiChannelPCM = (MultiChannelData * 32768).astype('<i2').tobytes()
+                        self._frames.append(MultiChannelPCM)
+                        self.wf.writeframes(b''.join(self._frames))
+                    else:
+                        data = (MultiChannelData[:, 5] * 32768).astype('<i2').tobytes()
+
+                if self.duplex:
+                    streamOut.write(data, self.CHUNK)  # play back audio stream
+
+        except KeyboardInterrupt:
+            print('stop recording...')
+            stream.stop_stream()
+            stream.close()
             if self.duplex:
-                streamOut.write(data, self.CHUNK)  # play back audio stream
+                streamOut.stop_stream()
+                streamOut.close()
 
-        stream.stop_stream()
-        stream.close()
-        if self.duplex:
-            streamOut.stop_stream()
-            streamOut.close()
+            if self.save_rec_to_file:
+                self.wf.close()
 
-        if self.save_rec_to_file:
-            self.wf.close()
-
-        self.p.terminate()
+            self.p.terminate()
 
     def stop(self):
         self._running = False
