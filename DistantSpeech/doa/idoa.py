@@ -133,15 +133,11 @@ class Idoa(object):
 
             if theta is not None:
                 den = np.linalg.norm(self.Psi[:, :, theta], axis=-1) * np.linalg.norm(B_hat[:, :], axis=-1)
-                Delta[:, theta] = np.real(np.einsum('ij,ij->i', self.Psi[:, :, theta].conj(), B_hat[:, :])) / (
-                    den + 1e-6
-                )  # eq.8
+                Delta[:, theta] = np.real(np.einsum('ij,ij->i', self.Psi[:, :, theta].conj(), B_hat[:, :])) / (den + 1e-6)  # eq.8
             else:
                 for theta_n in range(n_theta):
                     den = np.linalg.norm(self.Psi[:, :, theta_n], axis=-1) * np.linalg.norm(B_hat[:, :], axis=-1)
-                    Delta[:, theta_n] = np.real(np.einsum('ij,ij->i', self.Psi[:, :, theta_n].conj(), B_hat[:, :])) / (
-                        den + 1e-6
-                    )  # eq.8
+                    Delta[:, theta_n] = np.real(np.einsum('ij,ij->i', self.Psi[:, :, theta_n].conj(), B_hat[:, :])) / (den + 1e-6)  # eq.8
 
             avg = (1 - self.p) * 0.98
             # eq.15, mean of ∆(k; n) during target speech activity
@@ -161,7 +157,7 @@ class Idoa(object):
             # self.p_h0 = (1 + np.cos(8 * np.pi * (Delta - self.mu_Delta_h0))) / 2
 
             # eq.9, p(Delta | Hd), target speech present
-            self.p_hd = beta_n * np.exp(beta * (Delta - 1))
+            self.p_hd = beta_n[n, :] * np.exp(beta * (Delta - 1))
 
             # eq.13 log-likelihood ratio
             self.Lambda = self.p_hd / (self.p_h0 + 1e-6)
@@ -203,7 +199,10 @@ class Idoa(object):
 
         target_direction = theta if theta is not None else default_direction
 
-        out = np.maximum(np.mean(p[64:128, :, target_direction], axis=0), 0.01) * X[:, 0, 0]
+        out = np.maximum(np.mean(p[64:128, :, target_direction], axis=0), 0.01) * X[:, :, 0]
+
+        if n_frames > 1:
+            out = out[..., np.newaxis]
 
         output = self.transform.istft(out)
 
@@ -227,7 +226,7 @@ class IdoaRealtime(realtime_processing):
     ):
         super().__init__(EnhancementMehtod, angle, chunk, channels, rate, Recording, duplex, save_rec_to_file)
 
-        mic_array = MicArray(arrayType='circular', M=4, n_fft=2048)
+        mic_array = MicArray(arrayType='circular', M=4, n_fft=512)
         self.idoa = Idoa(mic_array)
 
     def process(self, data):
