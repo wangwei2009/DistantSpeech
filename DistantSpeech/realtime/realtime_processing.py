@@ -3,13 +3,6 @@ import wave
 
 import pyaudio
 import numpy as np
-import threading
-import wave
-
-import numpy as np
-import pyaudio
-
-from DistantSpeech.beamformer.fixedbeamformer import FixedBeamformer
 
 
 class realtime_processing(object):
@@ -109,23 +102,21 @@ class realtime_processing(object):
         while self._running:
             self._frames = []
             data = stream.read(self.CHUNK)
-            MultiChannelData = np.zeros((self.CHUNK, 6), dtype=float)
             if self.CHANNELS == 6:
 
                 samps = np.frombuffer(data, dtype='<i2').astype(np.float32, order='C') / 32768.0
                 # start = time.clock()
                 MultiChannelData = np.reshape(samps, (self.CHUNK, 6))
 
-                # yout = self.EnhancementMethod.process(MultiChannelData[:, 1:5].T, self.angle, self.method)
-                # MultiChannelData[:, 5] = yout['data']
                 MultiChannelData[:, 5] = self.process(MultiChannelData[:, 1:5])
-                data = (MultiChannelData[:, 5] * 32768).astype('<i2').tobytes()
                 # end = time.clock()
                 # print(end - start, '\n')
                 if self.save_rec_to_file:
                     MultiChannelPCM = (MultiChannelData * 32768).astype('<i2').tobytes()
                     self._frames.append(MultiChannelPCM)
                     self.wf.writeframes(b''.join(self._frames))
+                else:
+                    data = (MultiChannelData[:, 5] * 32768).astype('<i2').tobytes()
 
             if self.duplex:
                 streamOut.write(data, self.CHUNK)  # play back audio stream
