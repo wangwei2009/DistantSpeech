@@ -7,11 +7,11 @@ from DistantSpeech.beamformer.MicArray import MicArray
 def gen_noise_msc(
     mic: MicArray,
     nfft=256,
-    fs=16000,
-    c=340,
     Fvv_max=0.9998,
 ):
     M = mic.M
+    c = mic.c
+    fs = mic.fs
     half_bin = round(nfft / 2 + 1)
     Fvv = np.zeros((half_bin, M, M))
     f = np.linspace(0, fs / 2, half_bin)

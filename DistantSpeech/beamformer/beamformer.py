@@ -155,6 +155,66 @@ def compute_mvdr_weight(steer_vector, Rvv_inv, Gmin=0.0631, beta=1):
     return w.squeeze()
 
 
+def update_psd(Z, Pxii, alpha=0.8):
+    """update auto power spectrum desity
+
+    Parameters
+    ----------
+    Z : complex np.ndarray
+        input signal, [half_bin, channels]
+    Pxii : np.ndarray
+        input signal, [half_bin, channels]
+    alpha : float, optional
+        recursive average factor, by default 0.8
+
+    Returns
+    -------
+    self.Pxii : np.array
+        averaged auto power spectrum desity
+    """
+    # update auto-spectral
+    Pxii_curr = np.real(Z * Z.conj())
+    Pxii = alpha * Pxii + (1 - alpha) * Pxii_curr
+
+    return Pxii
+
+
+def update_csd(
+    Z: np.ndarray,
+    Pxij,
+    alpha=0.8,
+):
+    """update cross power spectrum desity
+
+    Parameters
+    ----------
+    Z : complex np.ndarray
+        input signal, [half_bin, channels]
+    Pxij : complex np.ndarray
+        input signal, [half_bin, M*(M-1)/2]
+    alpha : float, optional
+        recursive average factor, by default 0.8
+
+    Returns
+    -------
+    self.Pxii : np.array
+        averaged cross power spectrum desity, [half_bin, M*(M-1)/2]
+    """
+    t = 0
+    M = Z.shape[1]
+
+    # update cross-spectral
+    for i in range(0, M - 1):
+        for j in range(i + 1, M):
+            # cross - spectral
+            Pxij_curr = Z[:, i] * Z[:, j].conj()
+            # average
+            Pxij[:, t] = alpha * Pxij[:, t] + (1 - alpha) * Pxij_curr
+            t = t + 1
+
+    return Pxij
+
+
 class beamformer(object):
     """
     beamformer base class
@@ -166,8 +226,6 @@ class beamformer(object):
         frame_len=256,
         hop=None,
         nfft=None,
-        r=0.032,
-        fs=16000,
     ):
         self.MicArray = mic
         self.M = mic.M
@@ -183,8 +241,8 @@ class beamformer(object):
         else:
             self.nfft = int(nfft)
         self.c = self.MicArray.c
-        self.r = r
-        self.fs = fs
+        self.r = self.MicArray.r
+        self.fs = self.MicArray.fs
         self.half_bin = round(self.nfft / 2 + 1)
         self.freq_bin = np.linspace(0, self.half_bin - 1, self.half_bin)
         self.omega = 2 * np.pi * self.freq_bin * self.fs / self.nfft
@@ -201,7 +259,7 @@ class beamformer(object):
         self.W = np.zeros((self.half_bin, self.M), dtype=complex)
 
         # generate diffuse model
-        self.Fvv = gen_noise_msc(mic=self.MicArray, nfft=self.nfft, fs=self.fs, c=self.c)
+        self.Fvv = gen_noise_msc(mic=self.MicArray, nfft=self.nfft)
 
         self.transformer = Transform(n_fft=self.nfft, hop_length=self.hop, channel=self.M)
         self.transform = Transform(n_fft=self.nfft, hop_length=self.hop, channel=self.M)
