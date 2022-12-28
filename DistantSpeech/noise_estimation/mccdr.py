@@ -7,6 +7,7 @@ Multi-Channel Speech Presence Probability
 
 .. [1] M. Taseska and E. A. P. Habets, "Nonstationary Noise PSD Matrix Estimation for Multichannel
     Blind Speech Extraction," in IEEE/ACM Transactions on Audio, Speech, and Language Processing, vol. 25, no. 11, pp. 2223-2236, Nov. 2017, doi: 10.1109/TASLP.2017.2750239.
+.. [2] A. Schwarz and W. Kellermann, "Coherent-to-Diffuse Power Ratio Estimation for Dereverberation," in IEEE/ACM Transactions on Audio, Speech, and Language Processing, vol. 23, no. 6, pp. 1006-1018, June 2015, doi: 10.1109/TASLP.2015.2418571.
 
 """
 
@@ -23,7 +24,7 @@ from DistantSpeech.noise_estimation.mcspp_base import McSppBase
 
 class McCDR(McSppBase):
     def __init__(self, nfft=256, channels=4) -> None:
-        super().__init__()
+        super().__init__(nfft=nfft, channels=channels)
 
         self.channels = channels
 
@@ -58,8 +59,8 @@ class McCDR(McSppBase):
 
         self.mcra = NoiseEstimationMCRA(nfft=self.nfft)
 
-        self.MicArray = MicArray()
-        self.Gamma_estimator = BinauralEnhancement(self.MicArray)
+        self.MicArray = MicArray(arrayType="circular", r=0.032, M=self.channels)
+        self.Gamma_estimator = BinauralEnhancement(self.MicArray, frameLen=nfft, nfft=nfft)
         self.Gamma = np.zeros(self.half_bin)
 
         self.frm_cnt = 0
@@ -121,43 +122,55 @@ class McCDR(McSppBase):
 
         return smoothed_x
 
-    def estimation(self, y):
+    def estimate_ddr(self, y, unbias=True):
+        """estimate multichannel Coherent-to-Diffusion Ratio
 
-        alpha = 0.6
-        self.Gamma_estimator.update_CSD_PSD(y.transpose(), alpha=alpha)
+        Parameters
+        ----------
+        y : complex np.array
+            input signal, [half_bin, channels]
+        """
+        alpha = 0.9
+        self.Gamma_estimator.update_CSD_PSD(y, alpha=alpha)
         self.Gamma_estimator.updateMSC()
 
-        for k in range(self.half_bin):
-
-            self.Gamma[k] = np.real(
-                (self.Gamma_estimator.Fvv[k, 0, 2] - self.Gamma_estimator.Fvv_est[k, 0, 2])
-                / (self.Gamma_estimator.Fvv_est[k, 0, 2])
-                - np.exp(-1j * np.angle(y[0, 2, k]))
+        if unbias:
+            # eq.[25] in [2]
+            Fn = self.Gamma_estimator.Fvv[:, 0, 2]
+            Fn2 = Fn**2
+            Fx = self.Gamma_estimator.Fvv_est[:, 0, 2]
+            Fx2 = np.abs(Fx) ** 2
+            Gamma = (Fn * Fx.real - Fx2 - np.sqrt(Fn2 * Fx.real**2 - Fn2 * Fx2 + Fn2 - 2 * Fn * Fx.real + Fx2)) / (
+                np.minimum(Fx2 - 1, -1e-3)
+            )
+        else:
+            # eq.[41], in [1]
+            Gamma = np.real(
+                (self.Gamma_estimator.Fvv[:, 0, 2] - self.Gamma_estimator.Fvv_est[:, 0, 2])
+                / (
+                    (self.Gamma_estimator.Fvv_est[:, 0, 2])
+                    - np.exp(1j * np.angle(self.Gamma_estimator.Pxij[:, 1]) + 1e-3)
+                )
             )
 
-            self.Phi_yy[:, :, k] = self.alpha * self.Phi_yy[:, :, k] + (1 - self.alpha) * (
-                np.conj(y[k : k + 1, :]).transpose() @ y[k : k + 1, :]
-            )
+        Gamma = Gamma**2
 
-            if self.frm_cnt < 100:
-                self.Phi_vv[:, :, k] = self.Phi_yy[:, :, k]
+        Gamma[Gamma > 1] = 1
+        Gamma[Gamma < 0] = 1e-3
 
-            self.Phi_xx = self.Phi_yy - self.Phi_vv
+        return Gamma
 
-            Phi_vv_inv = np.linalg.inv(self.Phi_vv[:, :, k] + np.eye(self.channels) * 1e-6)
+    def estimation(self, y, theta=135):
+        """estimate multichannel Coherent-to-Diffusion Ratio
 
-            self.xi[k] = np.trace(Phi_vv_inv @ self.Phi_yy[:, :, k]) - self.channels
-            self.xi[k] = np.maximum(self.xi[k], 1e-6)
+        Parameters
+        ----------
+        y : complex np.array
+            input signal, [half_bin, channels]
+        """
+        Gamma = self.estimate_ddr(y)
 
-            self.gamma[k] = (
-                y[k : k + 1, :] @ Phi_vv_inv @ self.Phi_xx[:, :, k] @ Phi_vv_inv @ np.conj(y[k : k + 1, :]).transpose()
-            )
-
-        self.compute_q(y)
-        self.compute_p(p_max=0.99, p_min=0.01)
-        self.update_noise_psd(y, beta=1.0)
-
-        self.frm_cnt = self.frm_cnt + 1
+        return Gamma
 
     def update_noise_psd(self, y: np.ndarray, beta=1.0):
         """
@@ -178,14 +191,27 @@ class McCDR(McSppBase):
 def main(args):
     from DistantSpeech.transform.transform import Transform
     from DistantSpeech.beamformer.utils import pmesh, load_wav
+    from DistantSpeech.beamformer.utils import load_audio as audioread
     from matplotlib import pyplot as plt
     import librosa
     import time
     from scipy.io import wavfile
 
-    filepath = "../../example/test_audio/rec1/"  # [u1,u2,u3,y]
-    # filepath = "./test_audio/rec1_mcra_gsc/"     # [y,u1,u2,u3]
-    x, sr = load_wav(os.path.abspath(filepath))  # [channel, samples]
+    array_data = []
+    for n in range(2, 6):
+        filename = '/home/wangwei/work/DistantSpeech/samples/audio_samples/xmos/rec1/音轨-{}.wav'.format(n)
+        # filename = '/home/wangwei/work/DistantSpeech/samples/audio_samples/xmos/meeting/1/wav/音轨-{}.wav'.format(n)
+        # filename = '/home/wangwei/work/DistantSpeech/samples/audio_samples/xmos/aioffice/1/ch4/音轨-{}.wav'.format(n)
+        # filename = '/home/wangwei/work/DistantSpeech/samples/audio_samples/xmos/meeting/2/ch4//音轨-{}.wav'.format(n)
+        # filename = '/home/wangwei/work/DistantSpeech/samples/audio_samples/xmos/anechoic/2/ch4/音轨-{}.wav'.format(n)
+        # filename = '/home/wangwei/work/DistantSpeech/samples/audio_samples/xmos/meeting/2/ch4/音轨-{}.wav'.format(n)
+        # filename = '/home/wangwei/work/DistantSpeech/samples/audio_samples/xmos/anechoic/1/ch4/音轨-{}.wav'.format(n)
+        # filename = '/home/wangwei/work/DistantSpeech/samples/audio_samples/xmos/office/1/ch4/音轨-{}.wav'.format(n)
+        filename = '/home/wangwei/work/DistantSpeech/samples/audio_samples/xmos/aioffice/5/ch4/音轨-{}.wav'.format(n)
+        data_ch = audioread(filename)
+        array_data.append(data_ch)
+    x = np.array(array_data).T
+    print(x.shape)
     sr = 16000
     r = 0.032
     c = 343
@@ -199,27 +225,26 @@ def main(args):
     fs = sr
 
     print(x.shape)
-    channel = x.shape[0]
+    channel = x.shape[1]
 
     transform = Transform(n_fft=512, hop_length=256, channel=channel)
 
-    D = transform.stft(x.transpose())  # [F,T,Ch]
+    D = transform.stft(x)  # [F,T,Ch]
     Y, _ = transform.magphase(D, 2)
     print(Y.shape)
     pmesh(librosa.power_to_db(Y[:, :, -1]))
     plt.savefig('pmesh.png')
 
-    mcspp = McSppBase(nfft=512, channels=4)
+    mcspp = McCDR(nfft=512, channels=4)
     noise_psd = np.zeros((Y.shape[0], Y.shape[1]))
     p = np.zeros((Y.shape[0], Y.shape[1]))
     Yout = np.zeros((Y.shape[0], Y.shape[1]), dtype=type(Y))
-    y = np.zeros(x.shape[1])
+    y = np.zeros(x.shape[0])
 
     start = time.process_time()
 
     for n in range(Y.shape[1]):
-        mcspp.estimation(Y[:, n, :])
-        p[:, n] = mcspp.p
+        p[:, n] = mcspp.estimation(Y[:, n, :])
         # Yout[:, n] = D[:, n, 0] * omlsa_multi.G
 
     end = time.process_time()
