@@ -4,15 +4,16 @@ from scipy.signal import windows
 from DistantSpeech.coherence.getweights_coherent import getweghts_coherent
 from DistantSpeech.postfilter.postfilter import PostFilter
 from DistantSpeech.beamformer.beamformer import beamformer
+from DistantSpeech.beamformer.MicArray import MicArray
 
 
 class BinauralEnhancement(beamformer):
-    def __init__(self, MicArray, frameLen=256, hop=None, nfft=None, c=343, d=0.032, fs=16000):
+    def __init__(self, MicArray, frameLen=256, hop=None, nfft=None):
 
-        beamformer.__init__(self, MicArray, frame_len=frameLen, hop=hop, nfft=nfft, c=c, r=d / 2, fs=fs)
+        beamformer.__init__(self, MicArray, frame_len=frameLen, hop=hop, nfft=nfft)
         self.M = MicArray.M
         self.fs = MicArray.fs
-        self.d = d
+        self.d = MicArray.r
         self.G = np.ones([self.half_bin], dtype=complex)
         self.Fvv_est = np.ones([self.half_bin, self.M, self.M], dtype=complex) * 0.98
 
