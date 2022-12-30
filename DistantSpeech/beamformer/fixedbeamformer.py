@@ -59,7 +59,7 @@ class TimeAlignment(beamformer):
         r=0.032,
         fs=16000,
     ):
-        super().__init__(mic_array, frame_len, hop, nfft, r, fs)
+        super().__init__(mic_array, frame_len, hop, nfft)
 
         self.angle = np.array(angle) / 180 * np.pi if isinstance(angle, list) else angle
 
