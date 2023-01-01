@@ -58,6 +58,7 @@ class McCDR(McSppBase):
         self.L = 125
 
         self.mcra = NoiseEstimationMCRA(nfft=self.nfft)
+        self.mcra.L = 65
 
         self.MicArray = MicArray(arrayType="circular", r=0.032, M=self.channels)
         self.Gamma_estimator = BinauralEnhancement(self.MicArray, frameLen=nfft, nfft=nfft)
@@ -136,9 +137,9 @@ class McCDR(McSppBase):
 
         if unbias:
             # eq.[25] in [2]
-            Fn = self.Gamma_estimator.Fvv[:, 0, 2]
+            Fn = self.Gamma_estimator.Fvv[:, 1, 2]
             Fn2 = Fn**2
-            Fx = self.Gamma_estimator.Fvv_est[:, 0, 2]
+            Fx = self.Gamma_estimator.Fvv_est[:, 1, 2]
             Fx2 = np.abs(Fx) ** 2
             Gamma = (Fn * Fx.real - Fx2 - np.sqrt(Fn2 * Fx.real**2 - Fn2 * Fx2 + Fn2 - 2 * Fn * Fx.real + Fx2)) / (
                 np.minimum(Fx2 - 1, -1e-3)
@@ -146,9 +147,9 @@ class McCDR(McSppBase):
         else:
             # eq.[41], in [1]
             Gamma = np.real(
-                (self.Gamma_estimator.Fvv[:, 0, 2] - self.Gamma_estimator.Fvv_est[:, 0, 2])
+                (self.Gamma_estimator.Fvv[:, 1, 2] - self.Gamma_estimator.Fvv_est[:, 1, 2])
                 / (
-                    (self.Gamma_estimator.Fvv_est[:, 0, 2])
+                    (self.Gamma_estimator.Fvv_est[:, 1, 2])
                     - np.exp(1j * np.angle(self.Gamma_estimator.Pxij[:, 1]) + 1e-3)
                 )
             )
@@ -168,7 +169,10 @@ class McCDR(McSppBase):
         y : complex np.array
             input signal, [half_bin, channels]
         """
-        Gamma = self.estimate_ddr(y)
+        Gamma = self.estimate_ddr(y, unbias=True)
+
+        self.mcra.estimation(y[:, 0])
+        Gamma = np.sqrt(Gamma * self.mcra.p)
 
         return Gamma
 
