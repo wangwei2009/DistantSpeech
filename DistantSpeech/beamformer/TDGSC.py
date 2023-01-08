@@ -123,12 +123,10 @@ class TDGSC(beamformer):
 
         samples, channels = x.shape
         output = np.zeros(samples)
+        output_bm = np.zeros((samples, channels - 1))
 
         for m in range(channels):
             x[:, m], self.dc_notch_mic[m].mem = self.dc_notch_mic[m].filter_dc_notch16(x[:, m])
-
-        D = self.transform.stft(x[:, 0])
-        print(D.shape)
 
         # overlaps-save approach, no need to use hop_size
         frameNum = int((samples) / self.frameLen)
@@ -141,15 +139,20 @@ class TDGSC(beamformer):
         for n in range(frameNum):
             x_n = x[n * self.frameLen : (n + 1) * self.frameLen, :]
 
-            G[:, t] = self.spp.estimation(D[:, t, :])
-            p[:, t] = self.spp.p
-
             fixed_output, x_aligned = self.fixed_beamformer(x_n)
+
+            D = self.transform.stft(fixed_output)
+            self.spp.estimation(D[:, 0, :])
+            p[:, n] = self.spp.p
 
             bm_output = self.blocking_matrix(x_aligned)
 
             # AIC block
-            output_n = self.aic(fixed_output, bm_output, p=1 - p[:, t : t + 1])
+            output_n = self.aic(
+                fixed_output,
+                bm_output,
+                p=1 - p[:, n : n + 1],
+            )
 
             if postfilter:
                 Y = self.transform_fbf.stft(output_n)
@@ -166,10 +169,10 @@ class TDGSC(beamformer):
                 output_n = self.transform_fbf.istft(Y)
 
             # output[n * self.frameLen : (n + 1) * self.frameLen] = fixed_output[:, 0]
-            # output[n * self.frameLen : (n + 1) * self.frameLen] = np.squeeze(bm_output[:, 0])
+            output_bm[n * self.frameLen : (n + 1) * self.frameLen, :] = np.squeeze(bm_output)
             output[n * self.frameLen : (n + 1) * self.frameLen] = np.squeeze(output_n)
 
-        return output, p
+        return output, p, output_bm
 
 
 if __name__ == "__main__":
