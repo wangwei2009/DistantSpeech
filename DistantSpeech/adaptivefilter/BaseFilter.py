@@ -83,18 +83,35 @@ class BaseFilter(object):
         return self.w
 
     def filter(self, data, data_d):
-        err = np.zeros(np.size(data))
+        """nlms filter function, estimated filter weights stored in self.w
+
+        Parameters
+        ----------
+        data : np.array
+            input signal, [samples, ]
+        data_d : np.array
+            expected signal, [samples, ]
+
+        Returns
+        -------
+        err : np.array
+            err signal, [samples, ]
+        w : np.array
+            estimated filter weights, [filter_len, ]
+        """
+        data = np.squeeze(data)
+        data_d = np.squeeze(data_d)
+        err = np.zeros(len(data))
         for n in range(len(data)):
-            self.update_input(data[n])
-            err[n] = self.update(data[n], data_d[n])
+            err[n], w = self.update(data[n], data_d[n])
 
         return err
 
 
 def main(args):
-    src = load_audio('cleanspeech_aishell3.wav')
+    src = load_audio('/home/wangwei/work/DistantSpeech/samples/audio_samples/cleanspeech_aishell3.wav')
     print(src.shape)
-    rir = load_audio('rir.wav')
+    rir = load_audio('/home/wangwei/work/DistantSpeech/samples/audio_samples/rir.wav')
     rir = rir[200:]
     rir = rir[:512, np.newaxis]
 
@@ -129,10 +146,35 @@ def main(args):
     plt.show()
 
 
+def test():
+    src = load_audio('/home/wangwei/work/DistantSpeech/samples/audio_samples/cleanspeech_aishell3.wav')
+    print(src.shape)
+    rir = load_audio('/home/wangwei/work/DistantSpeech/samples/audio_samples/rir.wav')
+    rir = rir[200:]
+    rir = rir[:512, np.newaxis]
+
+    # src = awgn(src, 30)
+    print(src.shape)
+
+    SNR = 20
+    data_clean = conv(src, rir[:, 0])
+    data = data_clean[: len(src)]
+    # data = awgn(data, SNR)
+
+    filter_len = 512
+    w = np.zeros((filter_len, 1))
+
+    lms = BaseFilter(filter_len=filter_len, mu=0.1, normalization=False)
+    nlms = BaseFilter(filter_len=filter_len, mu=0.1)
+
+    err_lms = lms.filter(src, data)
+    err_nlms = nlms.filter(src, data)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Neural Feature Extractor")
     parser.add_argument("-l", "--listen", action='store_true', help="set to listen output")  # if set true
     parser.add_argument("-s", "--save", action='store_true', help="set to save output")  # if set true
 
     args = parser.parse_args()
-    main(args)
+    test()
