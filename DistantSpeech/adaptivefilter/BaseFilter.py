@@ -15,7 +15,7 @@ def awgn(x, snr, seed=7):
     '''
     np.random.seed(seed)  # 设置随机种子
     snr = 10 ** (snr / 10.0)
-    xpower = np.sum(x ** 2) / len(x)
+    xpower = np.sum(x**2) / len(x)
     npower = xpower / snr
     noise = np.random.randn(len(x)) * np.sqrt(npower)
     return x + noise
@@ -41,14 +41,32 @@ class BaseFilter(object):
         self.input_buffer[1:] = self.input_buffer[:-1]
         self.input_buffer[0] = xt
 
-    def update(self, x_n, d_n, alpha=1e-4):
+    def update(self, x_n, d_n, eps=1e-4):
+        """nlms update function
+
+        Parameters
+        ----------
+        x_n : np.array
+            input signal, one sample
+        d_n : np.array
+            expected signal, one sample
+        alpha : float, optional
+            minv value to prevent divided by zero, by default 1e-4
+
+        Returns
+        -------
+        err : np.array
+            err signal, one sample
+        w : np.array
+            estimated filter coeffs, [filter_len, ]
+        """
         self.update_input(x_n)
 
         # error signal
         err = d_n - self.w.T @ self.input_buffer
 
         if self.norm:
-            grad = self.input_buffer * err / (self.input_buffer.T @ self.input_buffer+alpha)
+            grad = self.input_buffer * err / (self.input_buffer.T @ self.input_buffer + eps)
         else:
             grad = self.input_buffer * err  # LMS
 
@@ -85,7 +103,7 @@ def main(args):
 
     SNR = 20
     data_clean = conv(src, rir[:, 0])
-    data = data_clean[:len(src)]
+    data = data_clean[: len(src)]
     # data = awgn(data, SNR)
 
     filter_len = 512
@@ -100,11 +118,11 @@ def main(args):
     for n in tqdm(range((len(src)))):
         _, w_lms = lms.update(src[n], data[n])
         _, w_nlms = nlms.update(src[n], data[n])
-        est_err_lms[n] = np.sum(np.abs(rir - w_lms[:len(rir)])**2)
-        est_err_nlms[n] = np.sum(np.abs(rir - w_nlms[:len(rir)])**2)
+        est_err_lms[n] = np.sum(np.abs(rir - w_lms[: len(rir)]) ** 2)
+        est_err_nlms[n] = np.sum(np.abs(rir - w_nlms[: len(rir)]) ** 2)
 
-    plt.plot(10 * np.log(est_err_lms / np.sum(np.abs(rir[:, 0])**2) + 1e-12))
-    plt.plot(10 * np.log(est_err_nlms / np.sum(np.abs(rir[:, 0])**2)) + 1e-12)
+    plt.plot(10 * np.log(est_err_lms / np.sum(np.abs(rir[:, 0]) ** 2) + 1e-12))
+    plt.plot(10 * np.log(est_err_nlms / np.sum(np.abs(rir[:, 0]) ** 2)) + 1e-12)
     plt.legend(['lms', 'nlms'], loc='upper right')
     plt.ylabel("$\||\hat{w}-w\||_2$")
     plt.title('weight estimation error vs step')
