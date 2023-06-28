@@ -41,7 +41,7 @@ class BaseFilter(object):
         self.input_buffer[1:] = self.input_buffer[:-1]
         self.input_buffer[0] = xt
 
-    def update(self, x_n, d_n, eps=1e-4):
+    def update(self, x_n, d_n, eps=1e-4, p=1.0):
         """nlms update function
 
         Parameters
@@ -70,7 +70,9 @@ class BaseFilter(object):
         else:
             grad = self.input_buffer * err  # LMS
 
-        self.update_coef(grad)
+        if grad.ndim == 1:
+            grad = grad[:, np.newaxis]
+        self.w = self.w + 2 * p * self.mu * grad
 
         return err, self.w
 
