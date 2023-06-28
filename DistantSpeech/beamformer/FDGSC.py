@@ -76,7 +76,6 @@ class FDGSC(beamformer):
                     alpha=0.9,
                     non_causal=False,
                     constrain=True,
-                    weight_norm=True,
                 )
             )
 
