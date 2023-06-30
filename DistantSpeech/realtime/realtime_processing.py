@@ -1,5 +1,6 @@
 import threading
 import wave
+import time
 
 import pyaudio
 import numpy as np
@@ -38,7 +39,7 @@ class realtime_processing(object):
 
         self.p = pyaudio.PyAudio()
         input_device = self.get_audio_input_devices()
-        # print(input_device)
+        print(input_device)
 
     def audioDevice(self):
         pass
@@ -47,14 +48,15 @@ class realtime_processing(object):
         p = pyaudio.PyAudio()
         devices = []
         for i in range(p.get_device_count()):
-            # print(p.get_device_info_by_index(i).get('name'))
+            device_info = p.get_device_info_by_index(i)
+            print(f"Device {i}: {device_info}")
             devices.append(p.get_device_info_by_index(i))
         return devices
 
     def get_audio_input_devices(self):
         devices = []
         for item in self.get_audio_devices():
-            if item.get('maxInputChannels') > 4:
+            if item.get('maxInputChannels') == 6:
                 devices.append(item)
         return devices
 
@@ -67,16 +69,24 @@ class realtime_processing(object):
 
     def start(self):
         if self.isRecording:
-            print('Recording...\n')
-        threading._start_new_thread(self.__recording, ())
+            print('Recording...0\n')
+            #print(self.get_audio_input_devices())
+            rec_thread = threading.Thread(target=self.__recording)
+            print('Recording...1\n')
+            rec_thread.start()
 
     def process(self, data):
+    
+        if self.EnhancementMethod is None:
+            return data[:, 1]
+        else:
+            output = self.EnhancementMethod.process(data)
+            return output["data"]
 
-        return data[:, 1]
-
-    def recording(self):
+    def __recording(self):
         self._running = True
         self._frames = []
+        print('Recording...2\n')
 
         if self.duplex:
             streamOut = self.p.open(
@@ -95,24 +105,26 @@ class realtime_processing(object):
             rate=self.RATE,
             input=True,
             output=False,
-            # output_device_index=4,
+            input_device_index=3,
             frames_per_buffer=self.CHUNK,
         )
         print('Recording...\n')
-
         try:
             while self._running:
                 self._frames = []
                 data = stream.read(self.CHUNK)
+                
                 if self.CHANNELS == 6:
 
                     samps = np.frombuffer(data, dtype='<i2').astype(np.float32, order='C') / 32768.0
-                    # start = time.clock()
+                    start = time.perf_counter()
                     MultiChannelData = np.reshape(samps, (self.CHUNK, 6))
 
                     MultiChannelData[:, 5] = self.process(MultiChannelData[:, 1:5])
-                    # end = time.clock()
-                    # print(end - start, '\n')
+                    end = time.perf_counter()
+                    time_cost = end - start
+                    if time_cost > self.CHUNK / 16000:
+                        print(f'time_cost overflow: {time_cost}')
                     if self.save_rec_to_file:
                         MultiChannelPCM = (MultiChannelData * 32768).astype('<i2').tobytes()
                         self._frames.append(MultiChannelPCM)
@@ -159,4 +171,4 @@ class realtime_processing(object):
 if __name__ == "__main__":
 
     ptr = realtime_processing(Recording=True, save_rec_to_file=True)
-    ptr.recording()
+    ptr.start()
