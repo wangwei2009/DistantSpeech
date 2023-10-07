@@ -46,8 +46,16 @@ class Idoa(object):
 
         # Presence of a sound source
         self.Delta = np.zeros((half_bin, n_theta))
+
+        # eq.15, mean of ∆(k; n) during target speech activity
         self.mu_Delta = np.zeros((half_bin, n_theta))
-        self.B_hat = np.zeros((half_bin, idoa_dim), dtype=complex)  # estimated RTF
+
+        # mean of ∆(k; n) during target speech absence
+        self.mu_Delta_h0 = np.zeros((half_bin, n_theta))
+        self.var_Delta_h0 = np.ones((half_bin, n_theta)) * 0.1
+
+        # estimated RTF
+        self.B_hat = np.zeros((half_bin, idoa_dim), dtype=complex)
 
         self.Y_smooth = np.zeros((half_bin,))  #
         self.Y_xcorr_smooth = np.zeros((half_bin, idoa_dim), dtype=complex)  #
@@ -67,7 +75,8 @@ class Idoa(object):
             steer_vector = mic_array.steering_vector(look_direction=theta_n)
             self.Psi[:, :, theta_n] = steer_vector[:, 1:] / steer_vector[:, 0:1]
 
-        self.p_h0 = np.zeros((half_bin, n_theta))  # eq.11, target speech absence
+        # eq.11, target speech absence
+        self.p_h0 = np.zeros((half_bin, n_theta))
         self.p_hd = np.zeros((half_bin, n_theta))  # eq.9, target speech present
         self.p_h0[:, ...] = 0.5
         self.p_hd[:, ...] = 0.5
@@ -124,26 +133,31 @@ class Idoa(object):
 
             if theta is not None:
                 den = np.linalg.norm(self.Psi[:, :, theta], axis=-1) * np.linalg.norm(B_hat[:, :], axis=-1)
-                Delta[:, theta] = np.real(np.einsum('ij,ij->i', self.Psi[:, :, theta].conj(), B_hat[:, :])) / (
-                    den + 1e-6
-                )  # eq.8
+                Delta[:, theta] = np.real(np.einsum('ij,ij->i', self.Psi[:, :, theta].conj(), B_hat[:, :])) / (den + 1e-6)  # eq.8
             else:
                 for theta_n in range(n_theta):
                     den = np.linalg.norm(self.Psi[:, :, theta_n], axis=-1) * np.linalg.norm(B_hat[:, :], axis=-1)
-                    Delta[:, theta_n] = np.real(np.einsum('ij,ij->i', self.Psi[:, :, theta_n].conj(), B_hat[:, :])) / (
-                        den + 1e-6
-                    )  # eq.8
+                    Delta[:, theta_n] = np.real(np.einsum('ij,ij->i', self.Psi[:, :, theta_n].conj(), B_hat[:, :])) / (den + 1e-6)  # eq.8
 
-            avg = (1 - self.p) * 0.8
+            avg = (1 - self.p) * 0.98
+            # eq.15, mean of ∆(k; n) during target speech activity
             self.mu_Delta = avg * self.mu_Delta + (1 - avg) * Delta
+
+            avg_d = 0.998
+            avg = avg_d + (1 - avg_d) * self.p
+            # avg = 0.998
+            self.mu_Delta_h0 = avg * self.mu_Delta_h0 + (1 - avg) * Delta
+            self.var_Delta_h0 = (1 - avg) * self.var_Delta_h0 + avg * (Delta - self.mu_Delta_h0) ** 2
+            self.var_Delta_h0 = np.maximum(self.var_Delta_h0, 0.01)
             beta_n[n, :] = 1 / (1 - np.mean(self.mu_Delta[72:128, :], axis=0))
             # beta_n[n, theta_n] = beta
 
             # eq.11, p(Delta | H0), target speech absence
-            self.p_h0 = 1 + np.cos(np.pi * Delta)
+            self.p_h0 = np.exp(-((Delta - self.mu_Delta_h0) ** 2) / (2 * 0.5**2))
+            # self.p_h0 = (1 + np.cos(8 * np.pi * (Delta - self.mu_Delta_h0))) / 2
 
             # eq.9, p(Delta | Hd), target speech present
-            self.p_hd = beta_n * np.exp(beta * (Delta - 1))
+            self.p_hd = beta_n[n, :] * np.exp(beta * (Delta - 1))
 
             # eq.13 log-likelihood ratio
             self.Lambda = self.p_hd / (self.p_h0 + 1e-6)
@@ -154,7 +168,7 @@ class Idoa(object):
 
         return p
 
-    def process(self, x, theta=None, pre_emphsis=False):
+    def process(self, x, theta=None, default_direction=90, pre_emphsis=False):
         """spatial speech presence probability estimation
 
         Parameters
@@ -162,7 +176,9 @@ class Idoa(object):
         x : np.array
             multichannel input signal, [samples, channels]
         theta : bool or int, optional
-            if specified, only compute theta dirction, otherwise (0, 360), by default None
+            if specified, only estimate theta dirction, otherwise (0, 360), by default None
+        default_direction : int or float, optional
+            default enhance direction, by default 90
 
         Returns
         -------
@@ -181,14 +197,52 @@ class Idoa(object):
 
         p = self.estimate(X, theta=theta)
 
-        out = np.maximum(np.mean(p[64:128, :, target_direction], axis=0), 0.01) * X[:, 0, 0]
+        target_direction = theta if theta is not None else default_direction
+
+        out = np.maximum(np.mean(p[64:128, :, target_direction], axis=0), 0.01) * X[:, :, 0]
+
+        if n_frames > 1:
+            out = out[..., np.newaxis]
 
         output = self.transform.istft(out)
 
         return output
 
 
-if __name__ == "__main__":
+from DistantSpeech.realtime.realtime_processing import realtime_processing
+
+
+class IdoaRealtime(realtime_processing):
+    def __init__(
+        self,
+        EnhancementMehtod=None,
+        angle=0,
+        chunk=1024,
+        channels=6,
+        rate=16000,
+        Recording=False,
+        duplex=False,
+        save_rec_to_file=False,
+    ):
+        super().__init__(EnhancementMehtod, angle, chunk, channels, rate, Recording, duplex, save_rec_to_file)
+
+        mic_array = MicArray(arrayType='circular', M=4, n_fft=512)
+        self.idoa = Idoa(mic_array)
+
+    def process(self, data):
+
+        output = self.idoa.process(data, 180)
+
+        return output
+
+
+def process_from_mic():
+
+    ptr = IdoaRealtime(Recording=True, save_rec_to_file=True)
+    ptr.recording()
+
+
+def process_from_file():
     from DistantSpeech.beamformer.utils import load_audio as audioread
     from DistantSpeech.beamformer.utils import pmesh, mesh, load_wav, save_audio, load_pcm, pt
 
@@ -236,7 +290,7 @@ if __name__ == "__main__":
         p[:, n, :] = idoa.p
         Out[n * hop_len : (n + 1) * hop_len] = output
 
-    array2D = p[:, :, target_direction].T
+    array2D = p[:, :, target_direction]
 
     plt.figure(figsize=(14, 8))
     size = array2D.shape
@@ -251,9 +305,16 @@ if __name__ == "__main__":
     plt.savefig('idoa_p.png')
 
     plt.figure(figsize=(14, 8))
-    plt.plot(np.mean(p[64:128, :, target_direction], axis=0))
+    # plt.plot(np.mean(p[64:128, :, target_direction], axis=0))
+    plt.plot((p[128, :, target_direction]))
     plt.grid()
     plt.show()
     plt.savefig('p.png')
 
     save_audio('out_spp.wav', Out)
+
+
+if __name__ == "__main__":
+
+    process_from_file()
+    # process_from_mic()

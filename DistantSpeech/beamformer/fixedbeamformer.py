@@ -45,7 +45,7 @@ def fir_filter(x, fir_coeffs, fir_cache):
         for n in range(input_len):
             output[n, m] = fir_coeffs[:, m : m + 1].T @ fir_input[n : n + fir_filter_len, m : m + 1]
 
-    return output, x[-fir_filter_len + 1 :, :]
+    return output, fir_input[-fir_filter_len + 1 :, :]
 
 
 class TimeAlignment(beamformer):
@@ -59,7 +59,7 @@ class TimeAlignment(beamformer):
         r=0.032,
         fs=16000,
     ):
-        super().__init__(mic_array, frame_len, hop, nfft, r, fs)
+        super().__init__(mic_array, frame_len, hop, nfft)
 
         self.angle = np.array(angle) / 180 * np.pi if isinstance(angle, list) else angle
 

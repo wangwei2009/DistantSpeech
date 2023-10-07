@@ -23,33 +23,15 @@ from DistantSpeech.beamformer.utils import visual, DelaySamples
 from DistantSpeech.noise_estimation.mcspp_base import McSppBase
 from DistantSpeech.transform.transform import Transform
 from DistantSpeech.noise_estimation import McSpp
-from DistantSpeech.transform.multirate import frac_delay, fractional_delay_filter_bank
 from DistantSpeech.adaptivefilter.feature import Emphasis, FilterDcNotch16
 from DistantSpeech.beamformer.fixedbeamformer import TimeAlignment
+from DistantSpeech.noise_estimation.mcra import NoiseEstimationMCRA
+from DistantSpeech.noise_estimation.omlsa_multi import NsOmlsaMulti
+from DistantSpeech.beamformer.ccafbounds import ccafbounds
 
 
-class DelayObj(object):
-    def __init__(self, buffer_size, delay, channel=1):
-        self.buffer_szie = buffer_size
-        self.n_delay = delay
-
-        self.buffer = np.zeros((channel, buffer_size + delay))
-
-    def delay(self, x):
-        """
-        delay x for self.delay point
-        :param x: (n_samples,) or (n_chs, n_samples)
-        :return:
-        """
-        if len(x.shape) == 1:
-            x = x[np.newaxis, :]
-        data_len = x.shape[1]
-
-        self.buffer[:, -data_len:] = x
-        output = self.buffer[:, :data_len].copy()
-        self.buffer[:, : self.n_delay] = self.buffer[:, -self.n_delay :]
-
-        return output
+from DistantSpeech.beamformer.gsc_bm import AdaptiveBlockingMatrixFilter as bm_filter
+from DistantSpeech.beamformer.gsc_aic import AdaptiveInterferenceCancellation as aic_filter
 
 
 class FDGSC(beamformer):
@@ -65,6 +47,9 @@ class FDGSC(beamformer):
             mic_array,
             frame_len=frameLen,
         )
+        # overlap-save fft
+        self.nfft = frameLen * 2
+
         self.angle = np.array(angle) / 180 * np.pi if isinstance(angle, list) else angle
 
         self.time_alignment = TimeAlignment(mic_array, angle=self.angle)
@@ -84,22 +69,53 @@ class FDGSC(beamformer):
 
         self.bm = []
         for m in range(self.M):
-            self.bm.append(FastFreqLms(filter_len=frameLen, mu=0.1, alpha=0.9, non_causal=True))
+            self.bm.append(
+                bm_filter(
+                    filter_len=frameLen,
+                    mu=0.1,
+                    alpha=0.9,
+                    non_causal=False,
+                    constrain=True,
+                )
+            )
 
-        self.aic_filter = FastFreqLms(filter_len=frameLen, n_channels=self.M, mu=0.1, alpha=0.9, non_causal=False)
+        self.aic_filter = aic_filter(
+            filter_len=frameLen,
+            n_channels=self.M,
+            mu=0.1,
+            alpha=0.9,
+            non_causal=False,
+            constrain=True,
+            weight_norm=True,
+        )
 
-        self.delay_fbf = DelaySamples(self.frameLen, int(frameLen / 2))
+        self.delay_fbf = DelaySamples(self.frameLen, frameLen)
 
-        self.delay_obj_bm = DelayObj(self.frameLen, 40, channel=self.M)
+        self.delay_x = DelaySamples(self.frameLen, int(self.frameLen / 2), channel=self.M)
+        self.delay_aligned = DelaySamples(self.frameLen, int(self.frameLen / 2), channel=self.M)
 
-        self.spp = McSpp(nfft=frameLen * 2, channels=self.M)
-        # self.spp = McSppBase(nfft=frameLen * 2, channels=self.M)
-        self.transform = Transform(n_fft=frameLen * 2, hop_length=frameLen, channel=self.M)
-        self.spp.mcra.L = 10
+        self.spp = McSppBase(nfft=frameLen * 2, channels=self.M)
+        self.spp = NoiseEstimationMCRA(nfft=frameLen * 2)
+        self.spp.L = 60
+
+        self.spp_fbf = NoiseEstimationMCRA(nfft=frameLen * 2)
+        self.spp_fbf.L = 60
+
+        self.transform = Transform(n_fft=frameLen * 2, hop_length=frameLen, channel=1)
+        self.transform_x = Transform(n_fft=frameLen * 2, hop_length=frameLen, channel=self.M)
+
+        self.omlsa_multi = NsOmlsaMulti(nfft=frameLen * 2, cal_weights=True, M=self.M)
+        self.transform_fbf = Transform(n_fft=frameLen * 2, hop_length=frameLen, channel=1)
+        self.transform_bm = Transform(n_fft=frameLen * 2, hop_length=frameLen, channel=self.M - 1)
+
+        self.phi, self.psi = ccafbounds(self.MicArray.mic_loc.T, p=129, order=frameLen)
 
         self.dc_notch_mic = []
         for _ in range(self.M):
             self.dc_notch_mic.append(FilterDcNotch16(radius=0.98))
+
+    def adaption_control(self, fbf, time_alignment):
+        pass
 
     def fixed_delay(self):
         pass
@@ -110,28 +126,70 @@ class FDGSC(beamformer):
         Parameters
         ----------
         x : np.array
-            input multichannel data, [chs, samples]
+            input multichannel data, [samples, chs]
 
         Returns
         -------
         np.array
-            output data, [1, samples]
+            output data, [samples, ]
         """
 
         return np.mean(x, axis=1, keepdims=True)
         # return output[0:1, :]
 
-    def blocking_matrix(self, x):
-        """
+    def blocking_matrix(self, x, fixed_output=None, p=1.0, mode=1):
+        """fixed blocking matrix
 
-        :param x: (n_chs, frame_len)
-        :return: bm output, (n_chs-1, frame_len)
-        """
-        output = np.zeros((self.M - 1, x.shape[1]))
-        for m in range(self.M - 1):
-            output[m, :] = self.bm[m].update(x[m, :], x[m + 1, :])
+        Parameters
+        ----------
+        x : np.array
+            input multichannel data, [samples, chs]
 
-        return output
+        Returns
+        -------
+        bm_output : np.array
+            output data, [samples, chs-1]
+        """
+        samples, channels = x.shape
+
+        # fixed blocking matrix
+        if mode == 0:
+            bm_output = np.zeros((samples, channels - 1))
+            for m in range(channels - 1):
+                bm_output[:, m] = x[:, m] - x[:, m + 1]
+
+        # fixed blocking matrix, use fbf as input signal
+        if mode == 1:
+            bm_output = np.zeros((samples, channels))
+            for m in range(channels):
+                bm_output[:, m] = fixed_output - x[:, m]
+
+        # adaptive blocking matrix, estimate RTF
+        if mode == 2:
+            bm_output = np.zeros((samples, channels - 1))
+            for m in range(1, channels):
+                bm_output[:, m : m + 1], w = self.bm[m].update(
+                    x[:, m - 1],
+                    x[:, m],
+                    p=p,
+                    filter_p=True,
+                    update=True,
+                    # fir_truncate=10,
+                )
+        # adaptive blocking matrix, use fbf as input signal
+        if mode == 3:
+            bm_output = np.zeros((samples, channels))
+            for m in range(channels):
+                bm_output[:, m : m + 1], w = self.bm[m].update(
+                    fixed_output,
+                    x[:, m],
+                    p=p,
+                    filter_p=True,
+                    update=True,
+                    # fir_truncate=10,
+                )
+
+        return bm_output
 
     def aic(self, z):
         """
@@ -140,71 +198,123 @@ class FDGSC(beamformer):
         """
         pass
 
-    def process(self, x):
+    def process(self, x, postfilter=False, dc_notch=True):
         """
         process core function
-        :param x: input time signal, (n_chs, n_samples)
+        :param x: input time signal, (n_samples, n_chs)
         :return: enhanced signal, (n_samples,)
         """
 
-        output = np.zeros(x.shape[1])
+        n_samples, channel = x.shape
+        output = np.zeros(n_samples)
 
-        # for m in range(self.M):
-        #     x[m, :], self.dc_notch_mic[m].mem = self.dc_notch_mic[m].filter_dc_notch16(x[m, :])
+        if dc_notch:
+            for m in range(self.M):
+                x[:, m], self.dc_notch_mic[m].mem = self.dc_notch_mic[m].filter_dc_notch16(x[:, m])
 
         # adaptive block matrix path
-        bm_output = np.zeros((x.shape[1], self.M))
-        fix_output = np.zeros((x.shape[1],))
+        bm_output = np.zeros((n_samples, self.M))
+        aligned_output = np.zeros((n_samples, self.M))
+        aligned_output_delayed = np.zeros((n_samples, self.M))
+        fix_output = np.zeros((n_samples,))
+        fix_output_delayed = np.zeros((n_samples,))
 
         # overlaps-save approach, no need to use hop_size
-        frameNum = int((x.shape[1]) / self.frameLen)
+        frameNum = int((n_samples) / self.frameLen)
 
         p = np.zeros((self.spp.half_bin, frameNum))
+        G = np.zeros((self.spp.half_bin, frameNum))
+
+        t = 0
 
         for n in range(frameNum):
-            x_n = x[:, n * self.frameLen : (n + 1) * self.frameLen]
+            x_n = x[n * self.frameLen : (n + 1) * self.frameLen, :]
 
-            x_aligned = self.time_alignment.process(x_n.T)
+            x_aligned = self.time_alignment.process(x_n)
 
-            D = self.transform.stft(x_aligned)
-
+            # fixed beamformer path
             fixed_output = self.fixed_beamformer(x_aligned)
 
-            p[:, n] = self.spp.estimation(D[:, 0, :], diag_value=1e-2)
+            # D = self.transform.stft(fixed_output[:, 0])
+            D = self.transform_x.stft(x_n)
+
+            self.spp.estimation(D[:, 0, :])
+            p[:, n] = self.spp.p
             # p[:, n] = np.sqrt(p[:, n])
             # p[:, n] = p[:, n] ** 2
 
-            # # fixed beamformer path
-            # fixed_output = self.fixed_beamformer(x_n)
+            p_bm = p[:, n : n + 1].copy()  # * np.mean(p[16:128, n : n + 1], axis=0, keepdims=True)
+            p1 = p[:32]
 
+            if np.mean(p_bm[32:128]) > 0.8:
+                # p1[:] = 0.999
+                p1[p1[:, n] < 0.8, n] = 0.8
+            else:
+                p_bm[:] = 1e-3
             # adaptive block matrix
-            # x_n = self.delay_obj_bm.delay(x_n)
-            for m in range(self.M):
-                bm_output_n, _ = self.bm[m].update(
-                    fixed_output, x_n[m, :], p=p[:, n : n + 1], fir_truncate=30, filter_p=True, update=True
-                )
-                bm_output[n * self.frameLen : (n + 1) * self.frameLen, m] = np.squeeze(bm_output_n)
+            x_n = self.delay_x.delay(x_n)
+            x_aligned_delayed_n = self.delay_aligned.delay(x_aligned)
+            bm_output_n = self.blocking_matrix(
+                x_aligned_delayed_n,
+                fixed_output,
+                # p=p[:, n : n + 1],
+                mode=3,
+            )
+            bm_output[n * self.frameLen : (n + 1) * self.frameLen, :] = np.squeeze(bm_output_n)
 
             # # # fix delay
-            fixed_output = self.delay_fbf.delay(fixed_output)
+            # fixed_output = self.fbf[n * self.frameLen : (n + 1) * self.frameLen, np.newaxis]
+            fixed_output_delayed_n = self.delay_fbf.delay(fixed_output)
             # fixed_output = fixed_output.T
+
+            Y = self.transform_fbf.stft(fixed_output_delayed_n)
+            self.spp_fbf.estimation(Y[:, 0, :])
+            p_fbf = self.spp.p
 
             # AIC block
             output_n, _ = self.aic_filter.update(
                 bm_output[n * self.frameLen : (n + 1) * self.frameLen, :],
-                fixed_output,
-                p=1 - p[:, n : n + 1],
-                fir_truncate=30,
+                fixed_output_delayed_n,
+                # p=1 - p_fbf[:, np.newaxis],  # p[:, n : n + 1],
+                p=1 - np.mean(p[:, n : n + 1]),
+                # fir_truncate=10,
             )
 
-            # output[n * self.frameLen : (n + 1) * self.frameLen] = bm_d[0, :]
-            # output[n * self.frameLen : (n + 1) * self.frameLen] = fixed_output[:, 0]
-            output[n * self.frameLen : (n + 1) * self.frameLen] = np.squeeze(output_n)
-            # output[n * self.frameLen : (n + 1) * self.frameLen] = bm_output[
-            #     n * self.frameLen : (n + 1) * self.frameLen, 0
-            # ]
+            if postfilter:
+                Y = self.transform_fbf.stft(output_n)
+                U = self.transform_bm.stft(bm_output[:, :-1])
 
-        return output, p
+                self.omlsa_multi.estimation(
+                    np.real(Y[:, 0, 0] * np.conj(Y[:, 0, 0])), np.real(U[:, 0, :] * np.conj(U[:, 0, :]))
+                )
+
+                # post-filter
+                G[:, t] = np.sqrt(self.omlsa_multi.G)
+                t += 1
+                Y[:, 0, 0] = Y[:, 0, 0] * np.sqrt(self.omlsa_multi.G)
+                output_n = self.transform_fbf.istft(Y)
+
+            # output[n * self.frameLen : (n + 1) * self.frameLen] = bm_d[0, :]
+            fix_output[n * self.frameLen : (n + 1) * self.frameLen] = fixed_output[:, 0]
+            fix_output_delayed[n * self.frameLen : (n + 1) * self.frameLen] = fixed_output_delayed_n[:, 0]
+            aligned_output[n * self.frameLen : (n + 1) * self.frameLen, :] = x_aligned[:, :]
+            aligned_output_delayed[n * self.frameLen : (n + 1) * self.frameLen, :] = x_aligned_delayed_n[:, :]
+            output[n * self.frameLen : (n + 1) * self.frameLen] = np.squeeze(output_n)
+            bm_output[n * self.frameLen : (n + 1) * self.frameLen, 0] = bm_output[
+                n * self.frameLen : (n + 1) * self.frameLen, 0
+            ]
+
+        return (
+            output,
+            p,
+            fix_output,
+            fix_output_delayed,
+            bm_output,
+            aligned_output,
+            aligned_output_delayed,
+            self.bm,
+            self.aic_filter,
+        )
 
 
 def main(args):

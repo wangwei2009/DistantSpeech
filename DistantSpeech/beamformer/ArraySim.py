@@ -4,8 +4,6 @@ import pyroomacoustics as pra
 from DistantSpeech.beamformer.utils import save_audio as audiowrite
 from DistantSpeech.beamformer.utils import load_audio as audioread
 
-import gpuRIR
-
 
 def unit_vec3D(phi):
     return np.array([[np.cos(phi), np.sin(phi), 0]]).T
@@ -115,6 +113,8 @@ def generate_rir(
     RIRs : np.array
         3D ndarray The first axis is the source, the second the receiver and the third the time, [num_src, num_rcv, samples]
     """
+
+    import gpuRIR
 
     nb_src = pos_src.shape[0]  # Number of sources
     nb_rcv = pos_rcv.shape[0]  # Number of receivers

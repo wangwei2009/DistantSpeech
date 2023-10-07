@@ -1,6 +1,6 @@
 """
 Multi-Channel Speech Presence Probability
-==============
+================
 
 ----------
 
@@ -21,7 +21,7 @@ import soundfile as sf
 from DistantSpeech.noise_estimation import NoiseEstimationMCRA, MCRA2, McSppBase
 from DistantSpeech.beamformer.utils import load_pcm
 from DistantSpeech.noise_estimation import McMcra
-from DistantSpeech.beamformer.MicArray import MicArray
+from DistantSpeech.noise_estimation.mccdr import McCDR
 
 EPSILON = np.finfo(np.float32).eps
 
@@ -51,6 +51,7 @@ class McSpp(McSppBase):
         # self.mcra = McMcra(nfft=nfft, channels=channels)
         self.mcra.L = 10
         # self.mcra.init_frame = 50
+        self.mccdr = McCDR(nfft=self.nfft)
 
         self.xi_last = np.zeros(self.half_bin)
         self.Phi_vv_inv_bin = np.zeros((self.half_bin, self.channels, self.channels), dtype=complex)
@@ -106,20 +107,25 @@ class McSpp(McSppBase):
         np.array
 
         """
-        self.mcra.estimation(np.abs(y[:, 0] * y[:, 0].conj()))
+        # self.mcra.estimation(np.abs(y[:, 0] * y[:, 0].conj()))
 
         # self.q = np.sqrt(1 - self.mcra.p / 2)
         self.q = np.sqrt(1 - self.mcra.p)
         self.q = np.minimum(np.maximum(self.q, q_min), q_max)
 
-        if np.mean(self.q[8:32]) > 0.8:
-            self.q[:] = 0.999999
+        p = self.mccdr.estimation(y)
+        self.q = 1 - p
+
+        # if np.mean(self.q[8:32]) > 0.8:
+        #     self.q[:] = 0.999999
 
         # if self.frm_cnt > 800:
         #     self.q[:] = 0.9999999
         # else:
         #     self.q[:] = self.mcra.q
         # self.q[:] = self.mcra.q[:]
+
+        return self.q
 
     def compute_q_local(self, y, Phi_vv_inv, Phi_yy, k, q_max=0.99, q_min=0.01):
         # eq.10,
@@ -194,7 +200,8 @@ class McSpp(McSppBase):
 
     def estimation_core(self, y, psd_yy=None, diag_value=1e-8):
         diag = np.eye(self.channels) * diag_value
-        diag_bin = np.broadcast_to(diag, (self.half_bin, self.channels, self.channels))
+        diag_bin = np.array(np.broadcast_to(diag, (self.half_bin, self.channels, self.channels)))
+        # diag_bin[:16, :] = diag_bin[:16, :] * 0.1
 
         # self.Phi_vv = condition_covariance(self.Phi_vv, 1e-6)
         # self.Phi_vv = condition_covariance_bin(self.Phi_vv, 1e-6)
@@ -244,13 +251,23 @@ class McSpp(McSppBase):
         """
 
         M = self.channels
-        diag_value = np.eye(M) * diag_value
+
+        q = self.compute_q(y, q_max=0.99, q_min=1e-2)
+
+        diag_value_min = 1e-4
+        diag_value_max = 1e-1
+
+        # high SNR , low diag_value
+        fmin = int(500 * self.nfft / 16000)
+        fmax = int(2000 * self.nfft / 16000)
+        q_avg = np.mean(q[fmin:fmax])
+
+        diag_value = np.eye(M) * (q_avg * diag_value_max + (1 - q_avg) * diag_value_min)
 
         psd_yy = np.einsum('ij,il->ijl', y, y.conj())
 
         self.Phi_yy = self.alpha * self.Phi_yy + (1 - self.alpha) * psd_yy
 
-        self.compute_q(y, q_max=0.99, q_min=1e-2)
         # self.q = np.sqrt(np.sqrt(self.q))
         # self.q = self.q / 2
 

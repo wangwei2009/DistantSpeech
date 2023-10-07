@@ -47,15 +47,35 @@ class DelayObj(object):
 
 class FastFreqLms(BaseFilter):
     def __init__(
-        self, filter_len=128, mu=0.01, constrain=True, n_channels=1, alpha=0.9, non_causal=False, two_path=False
+        self,
+        filter_len=128,
+        hop_len=None,
+        win_len=None,
+        mu=0.01,
+        constrain=True,
+        n_channels=1,
+        alpha=0.9,
+        non_causal=False,
+        two_path=False,
     ):
         BaseFilter.__init__(self, filter_len=filter_len, mu=mu)
         self.n_channels = n_channels
-        self.input_buffer = np.zeros((filter_len * 2, n_channels))  # to store [old, new]
 
-        self.n_fft = self.filter_len * 2
+        # circular convolution:
+        # linear convolution: win_len + filter_len - 1
+        self.hop_len = filter_len if hop_len is None else hop_len
+        self.win_len = filter_len * 2 if win_len is None else win_len
 
-        self.w_pad = np.zeros((self.filter_len * 2, n_channels))
+        self.input_buffer = np.zeros((self.win_len, n_channels))  # to store [old, new]
+
+        # circular convolution length L, should at least have hop_len valid output
+        # 2*L - N1 - N2 + 1 >= hop_len, usually L(n_fft) == N1(win_len),
+        # N1 >= hop_len + N2 - 1
+        min_win_len = self.hop_len + self.filter_len - 1
+        self.n_fft = 2 ** ((int)(np.log2(min_win_len)) + 1)
+
+        self.overlap = self.win_len - self.hop_len
+        self.w_pad = np.zeros((self.n_fft, n_channels))
 
         self.W = np.fft.rfft(self.w_pad, axis=0)
 
@@ -110,10 +130,74 @@ class FastFreqLms(BaseFilter):
         assert self.n_channels == xt_vec.shape[1], 'n_channels:{} != xt_vec.shape[1]:{}'.format(
             self.n_channels, xt_vec.shape[1]
         )
-        self.input_buffer[: self.filter_len, :] = self.input_buffer[self.filter_len :, :]  # old
-        self.input_buffer[self.filter_len :, :] = xt_vec  # new
+        self.input_buffer[: self.overlap, :] = self.input_buffer[-(self.overlap) :, :]  # old
+        self.input_buffer[-self.hop_len :, :] = xt_vec  # new
 
         return self.input_buffer
+
+    def compute_freq_conv(self, x_n_vec, d_n_vec):
+        """compute frequency-domain convolution between input x and expected d
+
+        Parameters
+        ----------
+        x_n_vec : np.array, (n_samples,) or (n_samples, n_chs)
+            input signal
+        d_n_vec : np.array,  (n_samples,) or (n_samples, 1)
+            expected signal
+
+        Returns
+        -------
+        X : np.array, (n_fft, n_chs)
+            filtered output signal
+        e : np.array,  (n_samples, 1)
+            error output signal
+        """
+
+        self.update_input(x_n_vec)
+        X = np.fft.rfft(self.input_buffer, n=self.n_fft, axis=0)
+        self.P = self.alpha * self.P + (1 - self.alpha) * np.sum(np.real((X.conj() * X)), axis=1, keepdims=True)
+
+        # save only the last half frame to avoid circular convolution effects and sum of multichannel signal
+        y = np.fft.irfft(np.sum(X * self.W, axis=-1))[-self.hop_len :]
+        y = y[:, np.newaxis]
+
+        if self.two_path:
+            y_f = np.fft.irfft(X * self.foreground, axis=0)[-self.filter_len :, :]
+            y_f = np.sum(y_f, axis=1, keepdims=True)
+
+        # use causal filter to estimate non-causal system will introduce a delay(filter_len/2) compare to expected signal
+        if self.non_causal:
+            d_n_vec = self.delay_samples.delay(d_n_vec)
+
+        if d_n_vec.ndim == 1:
+            d_n_vec = d_n_vec[:, np.newaxis]
+        e = d_n_vec - y
+
+        if self.two_path:
+            e_f = d_n_vec - y_f
+            e_f, e_b, y, y_b = self.transfer_logic(e_f, e, y_f, y)
+            e = d_n_vec - y
+
+        return X, e
+
+    def compute_freq_xcorr(self, X, e):
+
+        e_pad = np.concatenate((np.zeros((self.overlap, 1)), e), axis=0)
+
+        E = fft(e_pad, n=self.n_fft, axis=0)
+
+        self.P[self.P < 1e-4] = 1e-4
+        grad = X.conj() * E / self.P
+
+        return grad
+
+    def gradient_constraint(self, grad):
+
+        grad_1 = ifft(grad, n=self.n_fft, axis=0)
+        grad_1[-self.hop_len :] = 0
+        grad = fft(grad_1, n=self.n_fft, axis=0)
+
+        return grad
 
     def update(self, x_n_vec, d_n_vec, update=True, p=1.0, fir_truncate=None, filter_p=False):
         """fast frequency lms update function
@@ -138,45 +222,13 @@ class FastFreqLms(BaseFilter):
         w : np.array,  (filter_len, 1)
             estimated filter coeffs
         """
-        self.update_input(x_n_vec)
-        X = np.fft.rfft(self.input_buffer, n=self.n_fft, axis=0)
-        self.P = self.alpha * self.P + (1 - self.alpha) * np.sum(np.real((X.conj() * X)), axis=1, keepdims=True)
 
-        # p_mean = np.mean(p[24:128], axis=0)
-        # save only the last half frame to avoid circular convolution effects
-        y = np.fft.irfft(X * self.W, axis=0)[-self.filter_len :, :]
+        X, e = self.compute_freq_conv(x_n_vec, d_n_vec)
 
-        # summation of multichannel signal
-        y = np.sum(y, axis=1, keepdims=True)
-
-        if self.two_path:
-            y_f = np.fft.irfft(X * self.foreground, axis=0)[-self.filter_len :, :]
-            y_f = np.sum(y_f, axis=1, keepdims=True)
-
-        # use causal filter to estimate non-causal system will introduce a delay(filter_len/2) compare to expected signal
-        if self.non_causal:
-            d_n_vec = self.delay_samples.delay(d_n_vec)
-
-        if d_n_vec.ndim == 1:
-            d_n_vec = d_n_vec[:, np.newaxis]
-        e = d_n_vec - y
-
-        if self.two_path:
-            e_f = d_n_vec - y_f
-            e_f, e_b, y, y_b = self.transfer_logic(e_f, e, y_f, y)
-            e = d_n_vec - y
-
-        e_pad = np.concatenate((np.zeros((self.filter_len, 1)), e), axis=0)
-
-        E = fft(e_pad, n=self.n_fft, axis=0)
-
-        eps = 1e-6
-        grad = X.conj() * E / (self.P + eps)
+        grad = self.compute_freq_xcorr(X, e)
 
         if self.constrain:
-            grad_1 = ifft(grad, n=self.n_fft, axis=0)
-            grad_1[-self.filter_len :] = 0
-            grad = fft(grad_1, n=self.n_fft, axis=0)
+            grad = self.gradient_constraint(grad)
 
         if update:
             self.W = self.W + p * 2 * self.mu * grad  # update filter weights
@@ -214,7 +266,6 @@ def test_aic():
     d = np.squeeze(d)
 
     block_len = filter_len
-    block_num = len(x) // block_len
 
     fdaf = FastFreqLms(filter_len=filter_len, mu=0.1, alpha=0.8)
 
@@ -235,11 +286,8 @@ def test_aic():
 
 
 def main(args):
-    # src = load_audio('cleanspeech_aishell3.wav')
-    src = load_audio('cleanspeech.wav')
-    print(src.shape)
-    src = np.random.randn(len(src))  # white noise, best for adaptive filter
-    rir = load_audio('rir.wav')
+    src = np.random.randn(8 * 16000)  # white noise, best for adaptive filter
+    rir = load_audio('DistantSpeech/adaptivefilter/rir.wav')
     rir = rir[199:]
     rir = rir[:512, np.newaxis]
 
@@ -252,22 +300,16 @@ def main(args):
     data = awgn(data, SNR)
 
     filter_len = 512
-    w = np.zeros((filter_len, 1))
+    # hop_len = 512
 
-    block_len = filter_len
-    block_num = len(src) // block_len
+    fdaf = FastFreqLms(
+        filter_len=filter_len,
+        mu=1e-1,
+    )
 
-    fdaf = FastFreqLms(filter_len=filter_len, mu=0.1)
+    hop = fdaf.hop_len
 
-    lms = BaseFilter(filter_len=filter_len, mu=1e-4, normalization=False)
-    nlms = BaseFilter(filter_len=filter_len, mu=0.1)
-    #
-    blms = BlockLms(block_len=block_len, filter_len=filter_len, mu=0.1)
-    #
-    est_err_lms = np.zeros(np.size(data))
-    est_err_nlms = np.zeros(np.size(data))
-    est_err_blms = np.zeros(np.size(data))
-    est_err_fdaf = np.zeros(len(data) - filter_len)
+    est_err_fdaf = np.zeros(len(data) - hop)
 
     eps = 1e-6
 
@@ -276,30 +318,19 @@ def main(args):
     output = np.zeros((len(data), 1))
 
     for n in tqdm(range((len(src)))):
-
-        _, w_lms = lms.update(src[n], data[n])
-        _, w_nlms = nlms.update(src[n], data[n])
-        _, w_blms = blms.update(src[n], data[n])
-
-        est_err_lms[n] = np.sum(np.abs(rir - w_lms[: len(rir)]) ** 2)
-        est_err_nlms[n] = np.sum(np.abs(rir - w_nlms[: len(rir)]) ** 2)
-        est_err_blms[n] = np.sum(np.abs(rir - w_blms[: len(rir)]) ** 2)
-
-        if n < filter_len:
+        if n == 0:
             continue
-        if np.mod(n, block_len) == 0:
-            output[n - filter_len : n], w_fdaf = fdaf.update(src[n - filter_len : n], data[n - filter_len : n])
-        est_err_fdaf[n - filter_len] = np.sum(np.abs(rir - w_fdaf[: len(rir)]) ** 2)
+        if np.mod(n, hop) == 0:
+            output[n - hop : n], w_fdaf = fdaf.update(src[n - hop : n], data[n - hop : n])
+        est_err_fdaf[n - hop] = np.sum(np.abs(rir - w_fdaf[: len(rir)]) ** 2)
 
     rir_norm = np.sum(np.abs(rir[:, 0]) ** 2)
-    plt.plot(10 * np.log10(est_err_lms / rir_norm + eps))
-    plt.plot(10 * np.log10(est_err_nlms / rir_norm + eps))
-    plt.plot(10 * np.log10(est_err_blms / rir_norm + eps))
     plt.plot(10 * np.log10(est_err_fdaf / rir_norm + eps))
-    plt.legend(['lms', 'nlms', 'block-nlms', 'fd-lms'], loc='upper right')
+    plt.legend(['fd-lms'], loc='upper right')
     plt.ylabel("$\||\hat{w}-w\||_2$")
     plt.title('weight estimation error vs step')
     plt.show()
+    plt.savefig('flms2.png')
 
 
 if __name__ == "__main__":
@@ -308,5 +339,5 @@ if __name__ == "__main__":
     parser.add_argument("-s", "--save", action='store_true', help="set to save output")  # if set true
 
     args = parser.parse_args()
-    # main(args)
-    test_aic()
+    main(args)
+    # test_aic()
