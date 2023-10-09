@@ -2,21 +2,30 @@
 
 **A python package for TRUE real-time speech enhancement**
 
+This project is still a work in progress. Any suggestions or pull requests are welcome
+
 - Install
 
 ```
+git clone https://github.com/wangwei2009/DistantSpeech.git
+cd DistantSpeech
+virtualenv .venv && source .venv/bin/activate
 pip install -e .
 ```
 
+- Features
+  - microphone array simulation
+  - fixed beamformer
+  - adaptive beamformer
+  - dereverberation
+  - noise estimation
+  - realtime processing module
+  - ...
+
 - Usage
 
-```
-cd DistantSpeech
-source .venv/bin/activate
-pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
-swig -python DistantSpeech/noise_estimation/mcra.i
-gcc -c DistantSpeech/noise_estimation/mcra.c DistantSpeech/noise_estimation/mcra_wrap.c -I/home/wangwei/work/anaconda3/include/python3.7m -fPIC
-```
+A couple of  [ipynb notebook demos](https://github.com/wangwei2009/DistantSpeech/tree/main/example) are available
+
+
 
   
-
